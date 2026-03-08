@@ -1,0 +1,212 @@
+/* ── Traxus — Dark terminal theme ───────────────────────────────────────── */
+
+/* Custom color tokens used across widgets */
+$background:         #1a1b1e;
+$surface:            #232428;
+$surface-darken-1:   #1d1e22;
+$border-color:       #3d3f46;
+$border-sidebar:     #3d3f46;
+$primary:            #5865f2;
+$primary-lighten-1:  #717cf5;
+$accent:             #57f287;
+$text:               #dcddde;
+$text-muted:         #72767d;
+$error:              #ed4245;
+$hover:              #2e3035;
+$channel-active:     #57f287;
+$channel-active-bg:  #1e2a24;
+
+/* ── App shell ──────────────────────────────────────────────────────────── */
+
+App {
+    background: $background;
+    color: $text;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+Header {
+    background: $surface-darken-1;
+    color: $text;
+    text-style: bold;
+    dock: top;
+    height: 1;
+    border-bottom: tall $border-color;
+}
+
+Header .header--title {
+    color: $primary;
+    text-style: bold;
+}
+
+/* ── LoginScreen ─────────────────────────────────────────────────────────── */
+
+LoginScreen {
+    align: center middle;
+    background: $background;
+}
+
+#logo {
+    width: auto;
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+    text-align: center;
+}
+
+#subtitle {
+    width: 54;
+    text-align: center;
+    color: $text-muted;
+    margin-bottom: 2;
+}
+
+LoginScreen Input {
+    width: 54;
+    margin-bottom: 1;
+    border: round $border-color;
+    background: $surface;
+    color: $text;
+}
+
+LoginScreen Input:focus {
+    border: round $primary;
+}
+
+#connect-btn {
+    width: 54;
+    background: $primary;
+    color: white;
+    margin-top: 1;
+    text-style: bold;
+    border: none;
+}
+
+#connect-btn:hover {
+    background: $primary-lighten-1;
+}
+
+#connect-btn:focus {
+    background: $primary-lighten-1;
+    border: none;
+}
+
+#error-label {
+    width: 54;
+    text-align: center;
+    height: 1;
+    margin-top: 1;
+}
+
+/* ── ChatScreen layout ───────────────────────────────────────────────────── */
+
+ChatScreen {
+    background: $background;
+}
+
+Horizontal {
+    height: 1fr;
+}
+
+#main-panel {
+    width: 1fr;
+}
+
+#messages {
+    height: 1fr;
+}
+
+/* ── ChannelSidebar ──────────────────────────────────────────────────────── */
+
+ChannelSidebar {
+    width: 22;
+    background: $surface;
+    border-right: tall $border-color;
+}
+
+.sidebar-header {
+    height: 2;
+    padding: 1 1 0 1;
+    color: $text-muted;
+    text-style: bold;
+    background: $surface;
+    dock: top;
+}
+
+ChannelSidebar ListView {
+    background: $surface;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+ChannelSidebar ListItem {
+    padding: 0 1;
+    background: $surface;
+    color: $text-muted;
+    border: none;
+}
+
+ChannelSidebar ListItem:hover {
+    background: $hover;
+    color: $text;
+}
+
+ChannelSidebar ListItem.--highlight {
+    background: $channel-active-bg;
+    color: $channel-active;
+    text-style: bold;
+}
+
+/* ── MessageView ─────────────────────────────────────────────────────────── */
+
+MessageView {
+    background: $background;
+    border: none;
+    padding: 0 1;
+    height: 1fr;
+    scrollbar-color: $border-color;
+    scrollbar-background: $background;
+    scrollbar-corner-color: $background;
+}
+
+/* ── InputBar ────────────────────────────────────────────────────────────── */
+
+InputBar {
+    height: 3;
+    background: $surface;
+    border-top: tall $border-color;
+    layout: horizontal;
+    align: center middle;
+}
+
+.chan-label {
+    width: auto;
+    padding: 0 1;
+    color: $channel-active;
+    text-style: bold;
+}
+
+InputBar Input {
+    width: 1fr;
+    background: $surface;
+    border: none;
+    color: $text;
+    padding: 0 1;
+}
+
+InputBar Input:focus {
+    border: none;
+    background: $surface;
+}
+
+/* ── StatusBar ───────────────────────────────────────────────────────────── */
+
+StatusBar {
+    dock: bottom;
+    height: 1;
+    background: $surface-darken-1;
+    color: $text-muted;
+    padding: 0 1;
+    border-top: tall $border-color;
+}
