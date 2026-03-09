@@ -39,6 +39,10 @@ async def client_handler(ws: websockets.asyncio.server.ServerConnection) -> None
     client = None
     try:
         async for raw in ws:
+            if isinstance(raw, bytes):
+                if client is not None:
+                    await router.relay_voice(raw, ws, client)
+                continue
             client = await router.dispatch(raw, ws, client)
     except websockets.exceptions.ConnectionClosedOK:
         pass

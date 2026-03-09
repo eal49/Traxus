@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: Graceful degradation when sounddevice unavailable
 If `import sounddevice` fails at runtime, the client SHALL start normally with all text features intact. Voice slash commands SHALL display a local error message instead of attempting audio I/O. PTT keybinding SHALL be silently ignored.
 

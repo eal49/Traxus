@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from textual import events
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Header
@@ -15,6 +16,7 @@ class ChatScreen(Screen):
     """Main 3-panel chat layout."""
 
     DEFAULT_CSS = ""
+    BINDINGS = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -46,17 +48,32 @@ class ChatScreen(Screen):
 
     # ── Update helpers (called from TraxusApp) ────────────────────────────────
 
+    def _mv(self) -> MessageView | None:
+        """Return the MessageView, or None if the screen is not yet/still mounted."""
+        try:
+            return self.query_one("#messages", MessageView)
+        except Exception:
+            return None
+
     def append_chat(self, payload: dict) -> None:
-        self.query_one("#messages", MessageView).add_chat(payload)
+        mv = self._mv()
+        if mv:
+            mv.add_chat(payload)
 
     def append_system(self, content: str) -> None:
-        self.query_one("#messages", MessageView).add_system(content)
+        mv = self._mv()
+        if mv:
+            mv.add_system(content)
 
     def append_error(self, content: str) -> None:
-        self.query_one("#messages", MessageView).add_error(content)
+        mv = self._mv()
+        if mv:
+            mv.add_error(content)
 
     def append_local(self, content: str) -> None:
-        self.query_one("#messages", MessageView).add_local(content)
+        mv = self._mv()
+        if mv:
+            mv.add_local(content)
 
     def update_channel_list(self, channels: list[dict]) -> None:
         sidebar = self.query_one("#sidebar", ChannelSidebar)
@@ -70,6 +87,24 @@ class ChatScreen(Screen):
 
     def update_status(self, state: str, latency: int = 0, nick: str = "") -> None:
         self.query_one("#status-bar", StatusBar).update(state, latency, nick)
+
+    def update_ptt(self, active: bool) -> None:
+        self.query_one("#status-bar", StatusBar).update_ptt(active)
+
+    def update_voice_state(self, users: list[dict]) -> None:
+        if users:
+            names = ", ".join(u.get("username", "?") for u in users)
+            self.append_system(f"Voice members: {names}")
+        else:
+            self.append_system("Voice channel: no members")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 4:
+            self.app.toggle_ptt()  # type: ignore[attr-defined]
+            event.stop()
+
+    def action_ptt_toggle(self) -> None:
+        self.app.toggle_ptt()  # type: ignore[attr-defined]
 
     def load_history(self, history: list[dict]) -> None:
         mv = self.query_one("#messages", MessageView)

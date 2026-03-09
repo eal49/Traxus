@@ -44,6 +44,7 @@ class WsWorker:
         self._app = app
         self._ws: websockets.asyncio.client.ClientConnection | None = None
         self._send_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._binary_send_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._running = False
 
     # ── Public API (called from Textual event handlers) ───────────────────────
@@ -51,6 +52,10 @@ class WsWorker:
     def enqueue(self, payload: dict) -> None:
         """Queue a message to be sent to the server. Safe from any sync handler."""
         self._send_queue.put_nowait(json.dumps(payload))
+
+    def enqueue_binary(self, data: bytes) -> None:
+        """Queue raw bytes to be sent as a binary frame."""
+        self._binary_send_queue.put_nowait(data)
 
     def stop(self) -> None:
         """Signal the worker to stop reconnecting."""
@@ -110,6 +115,9 @@ class WsWorker:
         self, ws: websockets.asyncio.client.ClientConnection
     ) -> None:
         async for raw in ws:
+            if isinstance(raw, bytes):
+                self._post_audio_frame(raw)
+                continue
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
@@ -121,13 +129,27 @@ class WsWorker:
     async def _send_loop(
         self, ws: websockets.asyncio.client.ClientConnection
     ) -> None:
-        while True:
-            raw = await self._send_queue.get()
-            try:
-                await ws.send(raw)
-            except websockets.exceptions.WebSocketException:
-                # Connection broke; recv_loop will raise and gather will cancel us
-                break
+        text_get = asyncio.ensure_future(self._send_queue.get())
+        bin_get  = asyncio.ensure_future(self._binary_send_queue.get())
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {text_get, bin_get},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                try:
+                    for fut in done:
+                        data = fut.result()
+                        await ws.send(data)
+                        if fut is text_get:
+                            text_get = asyncio.ensure_future(self._send_queue.get())
+                        else:
+                            bin_get = asyncio.ensure_future(self._binary_send_queue.get())
+                except websockets.exceptions.WebSocketException:
+                    break
+        finally:
+            text_get.cancel()
+            bin_get.cancel()
 
     async def _ping_loop(
         self, ws: websockets.asyncio.client.ClientConnection
@@ -144,6 +166,10 @@ class WsWorker:
     def _post_server_message(self, payload: dict) -> None:
         from client.app import TraxusApp
         self._app.post_message(TraxusApp.ServerMessage(payload))
+
+    def _post_audio_frame(self, data: bytes) -> None:
+        from client.app import TraxusApp
+        self._app.post_message(TraxusApp.AudioFrame(data))
 
     def _post_state(self, state: str, detail: str = "") -> None:
         from client.app import TraxusApp

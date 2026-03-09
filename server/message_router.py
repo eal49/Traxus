@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
+from shared import voice_protocol
 
 if TYPE_CHECKING:
     from server.connection_manager import ConnectedClient, ConnectionManager
@@ -37,6 +38,8 @@ class MessageRouter:
             C2S.CREATE:        self._handle_create,
             C2S.LIST_CHANNELS: self._handle_list_channels,
             C2S.PING:          self._handle_ping,
+            C2S.VOICE_JOIN:    self._handle_voice_join,
+            C2S.VOICE_LEAVE:   self._handle_voice_leave,
         }
 
     # ── Entry point ───────────────────────────────────────────────────────────
@@ -241,6 +244,7 @@ class MessageRouter:
 
     async def _handle_create(self, payload, ws, client):
         name = str(payload.get("channel", "")).strip().lstrip("#")
+        channel_type = str(payload.get("channel_type", "text"))
 
         if not self._chan.is_valid_name(name):
             await self._send(ws, {
@@ -256,8 +260,11 @@ class MessageRouter:
             })
             return client
 
-        self._chan.create(name, topic="", created_by=client.username)
-        log.info("CREATE #%s by %s", name, client.username)
+        if channel_type == "voice":
+            self._chan.vcreate(name, topic="", created_by=client.username)
+        else:
+            self._chan.create(name, topic="", created_by=client.username)
+        log.info("CREATE #%s (type=%s) by %s", name, channel_type, client.username)
 
         await self._conn.broadcast_to_all({
             "type": S2C.CHANNEL_CREATED,
@@ -275,12 +282,79 @@ class MessageRouter:
         await self._send(ws, {"type": S2C.PONG, "ts": payload.get("ts", time.time())})
         return client
 
+    async def _handle_voice_join(self, payload, ws, client):
+        channel = str(payload.get("channel", "")).strip().lstrip("#")
+        ch = self._chan.get(channel)
+        if ch is None:
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NO_SUCH_CHANNEL,
+                "message": f"Channel #{channel} does not exist.",
+            })
+            return client
+        if ch.type != "voice":
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NOT_A_VOICE_CHANNEL,
+                "message": f"#{channel} is not a voice channel.",
+            })
+            return client
+
+        client.voice_channels.add(channel)
+        members = [
+            {"user_id": c.user_id, "username": c.username}
+            for c in self._conn.voice_clients_in_channel(channel)
+        ]
+        voice_state = {"type": S2C.VOICE_STATE, "channel": channel, "users": members}
+        for vc in self._conn.voice_clients_in_channel(channel):
+            await self._conn.send_to(vc.user_id, voice_state)
+        log.info("VJOIN user=%s channel=#%s", client.username, channel)
+        return client
+
+    async def _handle_voice_leave(self, payload, ws, client):
+        channel = str(payload.get("channel", "")).strip().lstrip("#")
+        client.voice_channels.discard(channel)
+        members = [
+            {"user_id": c.user_id, "username": c.username}
+            for c in self._conn.voice_clients_in_channel(channel)
+        ]
+        voice_state = {"type": S2C.VOICE_STATE, "channel": channel, "users": members}
+        for vc in self._conn.voice_clients_in_channel(channel):
+            await self._conn.send_to(vc.user_id, voice_state)
+        log.info("VLEAVE user=%s channel=#%s", client.username, channel)
+        return client
+
+    async def relay_voice(self, frame: bytes, ws: object, client: "ConnectedClient") -> None:
+        """Relay a binary audio frame to other voice channel members."""
+        try:
+            n = frame[0]
+            channel = frame[1:1 + n].decode()
+        except Exception:
+            return  # malformed frame — drop silently
+
+        username_bytes = client.username.encode()
+        s2c_frame = voice_protocol.pack_c2s(channel, frame[1 + n:])
+        # Prepend username: rebuild as S2C frame
+        ch_bytes = channel.encode()
+        s2c_frame = (
+            bytes([len(ch_bytes)]) + ch_bytes +
+            bytes([len(username_bytes)]) + username_bytes +
+            frame[1 + n:]
+        )
+
+        for vc in self._conn.voice_clients_in_channel(channel):
+            if vc.ws is ws:
+                continue
+            try:
+                await vc.ws.send(s2c_frame)
+            except Exception:
+                pass
+
     # ── Disconnect cleanup ────────────────────────────────────────────────────
 
     async def on_disconnect(self, client: "ConnectedClient") -> None:
         if client is None:
             return
         channels = list(client.channels)
+        voice_channels = list(client.voice_channels)
         self._conn.unregister(client.user_id)
         log.info("QUIT  user=%s", client.username)
 
@@ -291,6 +365,16 @@ class MessageRouter:
                 "content": f"{client.username} disconnected",
                 "ts": time.time(),
             })
+
+        for channel in voice_channels:
+            members = [
+                {"user_id": c.user_id, "username": c.username}
+                for c in self._conn.voice_clients_in_channel(channel)
+            ]
+            voice_state = {"type": S2C.VOICE_STATE, "channel": channel, "users": members}
+            for vc in self._conn.voice_clients_in_channel(channel):
+                await self._conn.send_to(vc.user_id, voice_state)
+
         # Refresh channel list for everyone
         await self._conn.broadcast_to_all(self._build_channel_list())
 

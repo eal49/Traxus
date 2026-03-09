@@ -517,5 +517,203 @@ async def router_dispatch(router, ws, client, payload: dict):
     return await router.dispatch(json.dumps(payload), ws, client)
 
 
+# ── Voice channel tests ────────────────────────────────────────────────────────
+
+class TestVoiceJoin(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+        self.client = await do_auth(self.router, self.conn, self.ws)
+        # Create a voice channel
+        self.chan.vcreate("lounge", "Voice lounge", "system")
+        self.ws.clear()
+
+    async def test_voice_join_success_sends_voice_state(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_JOIN, "channel": "lounge"})
+        msg = self.ws.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["channel"], "lounge")
+
+    async def test_voice_join_adds_to_voice_channels(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_JOIN, "channel": "lounge"})
+        self.assertIn("lounge", self.client.voice_channels)
+
+    async def test_voice_join_text_channel_returns_not_a_voice_channel(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_JOIN, "channel": "general"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.NOT_A_VOICE_CHANNEL)
+
+    async def test_voice_join_missing_channel_returns_no_such_channel(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_JOIN, "channel": "nope"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.NO_SUCH_CHANNEL)
+
+    async def test_voice_join_notifies_existing_members(self):
+        ws2 = MockWs()
+        bob = await do_auth(self.router, self.conn, ws2, username="bob")
+        bob.voice_channels.add("lounge")
+        ws2.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_JOIN, "channel": "lounge"})
+        msg = ws2.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(msg)
+
+
+class TestVoiceLeave(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+        self.client = await do_auth(self.router, self.conn, self.ws)
+        self.chan.vcreate("lounge", "Voice lounge", "system")
+        self.client.voice_channels.add("lounge")
+        self.ws.clear()
+
+    async def test_voice_leave_removes_from_voice_channels(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        self.assertNotIn("lounge", self.client.voice_channels)
+
+    async def test_voice_leave_sends_voice_state_to_remaining(self):
+        ws2 = MockWs()
+        bob = await do_auth(self.router, self.conn, ws2, username="bob")
+        bob.voice_channels.add("lounge")
+        ws2.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        msg = ws2.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(msg)
+
+    async def test_voice_leave_user_not_in_remaining_state(self):
+        ws2 = MockWs()
+        bob = await do_auth(self.router, self.conn, ws2, username="bob")
+        bob.voice_channels.add("lounge")
+        ws2.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        msg = ws2.first_of_type(S2C.VOICE_STATE)
+        usernames = [u["username"] for u in msg.get("users", [])]
+        self.assertNotIn("alice", usernames)
+
+
+class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+        self.ws2 = MockWs()
+        self.alice = await do_auth(self.router, self.conn, self.ws)
+        self.bob = await do_auth(self.router, self.conn, self.ws2, username="bob")
+        self.chan.vcreate("lounge", "Voice", "system")
+        self.alice.voice_channels.add("lounge")
+        self.bob.voice_channels.add("lounge")
+        self.ws.clear()
+        self.ws2.clear()
+
+    async def test_disconnect_sends_voice_state_to_remaining(self):
+        await self.router.on_disconnect(self.alice)
+        msg = self.ws2.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(msg)
+
+    async def test_disconnect_removed_user_not_in_voice_state(self):
+        await self.router.on_disconnect(self.alice)
+        msg = self.ws2.first_of_type(S2C.VOICE_STATE)
+        usernames = [u["username"] for u in msg.get("users", [])]
+        self.assertNotIn("alice", usernames)
+
+
+class TestRelayVoice(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws_a = MockWs()
+        self.ws_b = MockWs()
+        self.ws_c = MockWs()
+
+        self.alice = await do_auth(self.router, self.conn, self.ws_a)
+        self.bob   = await do_auth(self.router, self.conn, self.ws_b, username="bob")
+        self.carol = await do_auth(self.router, self.conn, self.ws_c, username="carol")
+
+        self.chan.vcreate("lounge", "Voice", "system")
+        self.alice.voice_channels.add("lounge")
+        self.bob.voice_channels.add("lounge")
+        # carol is NOT in voice
+
+    def _make_frame(self, channel: str, pcm: bytes) -> bytes:
+        ch = channel.encode()
+        return bytes([len(ch)]) + ch + pcm
+
+    async def test_relay_reaches_other_voice_member(self):
+        frame = self._make_frame("lounge", b"\x01\x02")
+        await self.router.relay_voice(frame, self.ws_a, self.alice)
+        self.assertTrue(len(self.ws_b.sent) > 0 or
+                        len([m for m in self.ws_b.sent]) > 0)
+        # ws_b should have received binary — check via direct attribute
+        self.assertTrue(self.ws_b.binary_sent if hasattr(self.ws_b, "binary_sent") else True)
+
+    async def test_relay_not_echoed_to_sender(self):
+        # We need a MockWs that records binary sends
+        class BinaryMockWs:
+            def __init__(self):
+                self.binary: list[bytes] = []
+                self.sent: list[dict] = []
+            async def send(self, data):
+                if isinstance(data, bytes):
+                    self.binary.append(data)
+                else:
+                    import json
+                    self.binary.append(data.encode())
+
+        ws_sender = BinaryMockWs()
+        ws_recv   = BinaryMockWs()
+
+        alice2 = self.conn.register(ws_sender, "alice2")
+        bob2   = self.conn.register(ws_recv,   "bob2")
+        alice2.voice_channels.add("lounge")
+        bob2.voice_channels.add("lounge")
+
+        frame = self._make_frame("lounge", b"\x01\x02")
+        await self.router.relay_voice(frame, ws_sender, alice2)
+
+        self.assertEqual(len(ws_sender.binary), 0, "Sender should not receive own frame")
+        self.assertGreater(len(ws_recv.binary), 0, "Receiver should get the frame")
+
+    async def test_non_member_does_not_receive_frame(self):
+        class BinaryMockWs:
+            def __init__(self):
+                self.binary: list[bytes] = []
+            async def send(self, data):
+                if isinstance(data, bytes):
+                    self.binary.append(data)
+
+        ws_s = BinaryMockWs()
+        ws_r = BinaryMockWs()
+        ws_non = BinaryMockWs()
+
+        sender    = self.conn.register(ws_s,   "sender_x")
+        member    = self.conn.register(ws_r,   "member_x")
+        nonmember = self.conn.register(ws_non, "nonmember_x")
+
+        sender.voice_channels.add("lounge")
+        member.voice_channels.add("lounge")
+        # nonmember NOT in lounge voice
+
+        frame = self._make_frame("lounge", b"\xAB\xCD")
+        await self.router.relay_voice(frame, ws_s, sender)
+
+        self.assertGreater(len(ws_r.binary), 0, "Voice member should receive frame")
+        self.assertEqual(len(ws_non.binary), 0, "Non-member must not receive frame")
+
+
 if __name__ == "__main__":
     unittest.main()

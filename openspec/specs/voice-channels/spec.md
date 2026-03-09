@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: Channel type field
 Every channel SHALL carry a `type` field with value `"text"` or `"voice"`. Existing channels bootstrapped at startup (general, random, dev) SHALL default to `"text"`. The `/vcreate` command creates channels with `type: "voice"`.
 

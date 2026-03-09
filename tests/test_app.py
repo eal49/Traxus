@@ -345,5 +345,196 @@ class TestCommandDispatch(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, LoginScreen)
 
 
+# ── AudioFrame dispatch ───────────────────────────────────────────────────────
+
+class TestAudioFrameDispatch(unittest.IsolatedAsyncioTestCase):
+    """
+    AudioFrame messages should dispatch to audio_engine.play() via
+    on_traxus_app_audio_frame. We mock AudioEngine to verify the call.
+    """
+
+    async def test_audio_frame_dispatches_to_play(self):
+        from unittest.mock import MagicMock, patch
+        from shared import voice_protocol
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+
+            played_chunks: list[bytes] = []
+
+            def fake_play(pcm_bytes: bytes) -> None:
+                played_chunks.append(pcm_bytes)
+
+            app._audio_engine.play = fake_play  # type: ignore[method-assign]
+
+            # Build a valid S2C frame
+            pcm = b"\x01\x02\x03\x04"
+            ch = b"lounge"
+            un = b"alice"
+            frame = bytes([len(ch)]) + ch + bytes([len(un)]) + un + pcm
+
+            app.post_message(TraxusApp.AudioFrame(frame))
+            await pilot.pause()
+
+            self.assertEqual(len(played_chunks), 1)
+            self.assertEqual(played_chunks[0], pcm)
+
+    async def test_malformed_audio_frame_does_not_crash(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+
+            app.post_message(TraxusApp.AudioFrame(b"\xff"))  # malformed
+            await pilot.pause()
+            # Should not crash — still on ChatScreen
+            self.assertIsInstance(app.screen, ChatScreen)
+
+
+# ── F9 PTT binding ────────────────────────────────────────────────────────────
+
+class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
+    """
+    F9 must trigger toggle_ptt() regardless of which widget is focused.
+
+    The binding is declared on TraxusApp with priority=True, which means
+    Textual checks it before dispatching the key to the focused Input widget.
+    These tests prove that priority=True wiring actually works end-to-end.
+    """
+
+    async def _on_chat(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+
+    async def test_f9_sets_transmitting_true_when_in_voice_channel(self):
+        """First F9 press while in a voice channel enables PTT."""
+        from unittest.mock import patch, MagicMock
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+
+            with patch("client.app.AUDIO_AVAILABLE", True):
+                app._audio_engine.start = MagicMock()
+                # capture_loop must exit immediately so the worker doesn't hang
+                async def _noop_capture(channel, send_fn):
+                    return
+                app._audio_engine.capture_loop = _noop_capture
+
+                await pilot.press("f9")
+                await pilot.pause()
+
+            self.assertTrue(
+                app._audio_engine.transmitting,
+                "F9 must set transmitting=True (PTT on); "
+                "if this fails, priority=True is missing or not working",
+            )
+
+    async def test_f9_sets_transmitting_false_on_second_press(self):
+        """Second F9 press while transmitting disables PTT."""
+        from unittest.mock import patch, MagicMock
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+
+            with patch("client.app.AUDIO_AVAILABLE", True):
+                app._audio_engine.start = MagicMock()
+                app._audio_engine.stop = MagicMock()
+
+                async def _noop_capture(channel, send_fn):
+                    return
+                app._audio_engine.capture_loop = _noop_capture
+
+                await pilot.press("f9")
+                await pilot.pause()
+                await pilot.press("f9")
+                await pilot.pause()
+
+            self.assertFalse(app._audio_engine.transmitting)
+
+    async def test_f9_updates_status_bar_ptt_indicator(self):
+        """F9 must update the PTT indicator in the status bar."""
+        from unittest.mock import patch, MagicMock
+        from client.widgets.status_bar import StatusBar
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+
+            with patch("client.app.AUDIO_AVAILABLE", True):
+                app._audio_engine.start = MagicMock()
+                async def _noop_capture(channel, send_fn):
+                    return
+                app._audio_engine.capture_loop = _noop_capture
+
+                await pilot.press("f9")
+                await pilot.pause()
+
+            sb = app.screen.query_one("#status-bar", StatusBar)
+            self.assertTrue(
+                sb.ptt_active,
+                "Status bar must show PTT active after F9",
+            )
+
+    async def test_f9_without_voice_channel_shows_error_not_crash(self):
+        """F9 when not in a voice channel must show an error message, not crash."""
+        from unittest.mock import patch
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            # current_voice_channel is "" by default
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+
+            with patch("client.app.AUDIO_AVAILABLE", True):
+                await pilot.press("f9")
+                await pilot.pause()
+
+            self.assertGreater(
+                _line_count(mv), before,
+                "F9 without a voice channel must print an error to the message view",
+            )
+            self.assertFalse(app._audio_engine.transmitting)
+
+    async def test_f9_fires_even_when_input_is_focused(self):
+        """
+        The Input widget normally absorbs all key events.
+        priority=True on the binding must bypass this.
+        """
+        from unittest.mock import patch, MagicMock
+        from textual.widgets import Input
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+
+            # Explicitly focus the Input widget (this is the normal state during chat)
+            app.screen.query_one("#message-input", Input).focus()
+            await pilot.pause()
+
+            with patch("client.app.AUDIO_AVAILABLE", True):
+                app._audio_engine.start = MagicMock()
+                async def _noop_capture(channel, send_fn):
+                    return
+                app._audio_engine.capture_loop = _noop_capture
+
+                await pilot.press("f9")
+                await pilot.pause()
+
+            self.assertTrue(
+                app._audio_engine.transmitting,
+                "F9 must fire even when the Input widget has focus; "
+                "priority=True binding is required for this to work",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

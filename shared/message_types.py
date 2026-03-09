@@ -17,6 +17,8 @@ class C2S:
     CREATE        = "create"
     LIST_CHANNELS = "list_channels"
     PING          = "ping"
+    VOICE_JOIN    = "voice_join"
+    VOICE_LEAVE   = "voice_leave"
 
 
 # ── Server → Client ──────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ class S2C:
     USER_LIST       = "user_list"
     ERROR           = "error"
     PONG            = "pong"
+    VOICE_STATE     = "voice_state"
 
 
 # ── Auth error reasons ────────────────────────────────────────────────────────
@@ -53,3 +56,4 @@ class ErrorCode:
     CHANNEL_EXISTS       = "channel_exists"
     NICK_TAKEN           = "nick_taken"
     INVALID_CHANNEL_NAME = "invalid_channel_name"
+    NOT_A_VOICE_CHANNEL  = "not_a_voice_channel"

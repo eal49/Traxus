@@ -1,2 +1,4 @@
 textual>=0.72.0
 websockets>=14.0
+sounddevice>=0.4
+numpy>=1.26

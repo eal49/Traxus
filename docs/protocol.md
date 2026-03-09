@@ -10,10 +10,32 @@ This document specifies every message type exchanged between Traxus clients and 
 |---|---|
 | Transport | WebSocket over TCP |
 | Text encoding | UTF-8 |
-| Frame type | Text frames only |
-| Framing | One JSON object per frame |
-| Required field | Every message **must** include a `"type"` string field |
+| Frame types | **Text** frames (JSON messages) and **Binary** frames (raw PCM audio) |
+| Text framing | One JSON object per text frame |
+| Required field | Every JSON message **must** include a `"type"` string field |
 | Server version | `0.1.0` (echoed in `auth_ok`) |
+
+### Binary Audio Frames
+
+Audio data is transmitted as WebSocket **binary frames** on the same connection as JSON text frames. The `websockets` library yields `str` for text frames and `bytes` for binary frames from the same iterator.
+
+**C2S binary frame (client → server):**
+```
+[1 byte : channel name length N]
+[N bytes: channel name (UTF-8)]
+[remaining: int16 LE PCM samples at 16 000 Hz, mono]
+```
+
+**S2C binary frame (server → client):**
+```
+[1 byte : channel name length N]
+[N bytes: channel name (UTF-8)]
+[1 byte : username length M]
+[M bytes: username (UTF-8)]
+[remaining: int16 LE PCM samples]
+```
+
+Audio parameters: `samplerate=16000`, `channels=1`, `dtype=int16`, `blocksize=320` samples (20 ms frames).
 
 ---
 
@@ -175,6 +197,36 @@ Keepalive heartbeat. The client sends this every 30 seconds.
 |---|---|---|---|
 | `type` | string | Yes | `"ping"` |
 | `ts` | float | Yes | Client-side Unix timestamp (seconds). Echoed back in `pong` for latency calculation. |
+
+---
+
+### voice_join
+
+Join a voice channel and begin participating in audio relay.
+
+```json
+{ "type": "voice_join", "channel": "lounge" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"voice_join"` |
+| `channel` | string | Yes | Voice channel name. Leading `#` stripped by server. |
+
+---
+
+### voice_leave
+
+Leave a voice channel and stop receiving/sending audio for it.
+
+```json
+{ "type": "voice_leave", "channel": "lounge" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"voice_leave"` |
+| `channel` | string | Yes | Voice channel name. Leading `#` stripped by server. |
 
 ---
 
@@ -439,6 +491,7 @@ Generic error response.
 | `channel_exists` | `create` targeting an already-existing channel |
 | `nick_taken` | `nick` where the new name is already in use |
 | `invalid_channel_name` | `create` with an invalid name; also used for invalid `nick` values |
+| `not_a_voice_channel` | `voice_join` targeting a channel that exists but has `type: "text"` |
 
 ---
 
@@ -456,3 +509,36 @@ Reply to a `ping`.
 | `ts` | float | The `ts` value echoed from the client's `ping`. |
 
 The client calculates round-trip latency as `(time.time() - ts) * 1000` ms.
+
+---
+
+### voice_state
+
+Current membership of a voice channel. Sent after every `voice_join`, `voice_leave`, and on disconnect cleanup.
+
+```json
+{
+  "type": "voice_state",
+  "channel": "lounge",
+  "users": [
+    { "user_id": "a1b2c3d4-...", "username": "alice" },
+    { "user_id": "b2c3d4e5-...", "username": "bob" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"voice_state"` |
+| `channel` | string | Voice channel this state applies to. |
+| `users` | array | Array of `{ user_id, username }` objects for all current voice members. Empty array means no one is in the channel. |
+
+Sent to: all current voice members of the channel (after join: includes the joiner; after leave/disconnect: does not include the departed user).
+
+---
+
+**Updated error codes** (additions to the existing error table):
+
+| Code | Trigger |
+|---|---|
+| `not_a_voice_channel` | `voice_join` targeting a text channel |

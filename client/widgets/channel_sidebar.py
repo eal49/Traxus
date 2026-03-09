@@ -29,7 +29,9 @@ class ChannelSidebar(Widget):
         for ch in channels:
             count = ch.get("member_count", 0)
             name = ch["name"]
-            label_text = f"  # {name}"
+            ch_type = ch.get("type", "text")
+            prefix = "♪" if ch_type == "voice" else "#"
+            label_text = f"  {prefix} {name}"
             if count:
                 label_text += f"  [dim]{count}[/dim]"
             item = ListItem(Label(label_text, markup=True), name=name)

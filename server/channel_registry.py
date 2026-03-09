@@ -20,6 +20,7 @@ class Channel:
     name: str
     topic: str
     created_by: str
+    type: str = "text"
     created_at: float = field(default_factory=time.time)
     history: deque = field(default_factory=lambda: deque(maxlen=MAX_HISTORY))
 
@@ -60,6 +61,11 @@ class ChannelRegistry:
         self._channels[name] = ch
         return ch
 
+    def vcreate(self, name: str, topic: str, created_by: str) -> Channel:
+        ch = Channel(name=name, topic=topic, created_by=created_by, type="voice")
+        self._channels[name] = ch
+        return ch
+
     def add_to_history(self, name: str, message: dict) -> None:
         ch = self._channels.get(name)
         if ch:
@@ -72,6 +78,7 @@ class ChannelRegistry:
             "name": ch.name,
             "topic": ch.topic,
             "member_count": member_count,
+            "type": ch.type,
         }
 
     @staticmethod

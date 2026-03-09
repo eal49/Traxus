@@ -229,3 +229,120 @@ No arguments.
 **Client effect:** Stops the WebSocket worker (closes the connection) and calls `app.exit()` to terminate the Textual TUI. The server detects the WebSocket close and broadcasts a disconnect notice to channels the user was in.
 
 **Nothing is sent to the server** as an explicit message — the WebSocket close frame signals the departure.
+
+---
+
+## /vcreate
+
+Create a new voice channel.
+
+```
+/vcreate <name>
+/vcreate #<name>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | Yes | Channel name. Must match `^[a-z0-9_-]{1,32}$`. A leading `#` is stripped. |
+
+**Client effect:** Strips any `#` prefix, then sends `C2S create` with `channel_type: "voice"`.
+
+**If no argument is given:** Displays a local usage hint without sending anything.
+
+**C2S message sent:**
+```json
+{ "type": "create", "channel": "lounge", "channel_type": "voice" }
+```
+
+**S2C responses (success):**
+
+| Type | When |
+|---|---|
+| `channel_created` | Broadcast to **all connected clients** |
+| `channel_list` | Broadcast to **all connected clients** (updated list, includes `type: "voice"`) |
+
+**Error responses:**
+
+| Condition | S2C `error.code` |
+|---|---|
+| Channel name fails regex validation | `invalid_channel_name` |
+| Channel already exists | `channel_exists` |
+
+---
+
+## /vjoin
+
+Join a voice channel and begin receiving audio.
+
+```
+/vjoin <channel>
+/vjoin #<channel>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `channel` | Yes | Voice channel name. Leading `#` stripped. |
+
+**Client effect:** Sends `C2S voice_join`. Requires `sounddevice` to be installed; if unavailable shows a local error.
+
+**C2S message sent:**
+```json
+{ "type": "voice_join", "channel": "lounge" }
+```
+
+**S2C responses (success):**
+
+| Type | When |
+|---|---|
+| `voice_state` | Sent to all current voice members (including the joining client) with the updated member list |
+
+**Error responses:**
+
+| Condition | S2C `error.code` |
+|---|---|
+| Channel does not exist | `no_such_channel` |
+| Channel exists but is a text channel | `not_a_voice_channel` |
+
+---
+
+## /vleave
+
+Leave the current (or specified) voice channel.
+
+```
+/vleave [channel]
+/vleave #[channel]
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `channel` | No | Channel to leave. Defaults to the current voice channel if omitted. Leading `#` stripped. |
+
+**Client effect:** Sends `C2S voice_leave`. Requires `sounddevice` to be installed.
+
+**C2S message sent:**
+```json
+{ "type": "voice_leave", "channel": "lounge" }
+```
+
+**S2C responses:**
+
+| Type | When |
+|---|---|
+| `voice_state` | Sent to remaining voice members with the updated (smaller) member list |
+
+---
+
+## Push-to-Talk (PTT) — F9
+
+Toggle microphone transmission on/off while in a voice channel.
+
+| Input | Action |
+|---|---|
+| `F9` | Toggle PTT — starts or stops sending mic audio to the voice channel |
+
+**Requirements:** Must be joined to a voice channel with `/vjoin` first. `sounddevice` and `numpy` must be installed.
+
+**Status bar:** When PTT is active, the status bar shows `● MIC` in red.
+
+**Note:** This is toggle mode (not hold-to-talk). `F9` is a priority binding that fires regardless of which widget is focused.

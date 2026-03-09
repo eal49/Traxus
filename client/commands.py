@@ -35,9 +35,16 @@ HELP_TEXT = """\
   /leave <channel>    Leave a channel
   /nick <name>        Change your display name
   /channels           List all available channels
-  /create <name>      Create a new channel
+  /create <name>      Create a new text channel
+  /vcreate <name>     Create a new voice channel
+  /vjoin <channel>    Join a voice channel
+  /vleave [channel]   Leave current (or specified) voice channel
+  F9                  Toggle push-to-talk (mic) in a voice channel
   /help               Show this help
   /quit               Disconnect and exit\
 """
 
-KNOWN_COMMANDS = {"join", "leave", "nick", "channels", "create", "help", "quit"}
+KNOWN_COMMANDS = {
+    "join", "leave", "nick", "channels", "create", "help", "quit",
+    "vcreate", "vjoin", "vleave",
+}

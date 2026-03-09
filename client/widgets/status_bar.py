@@ -25,9 +25,10 @@ class StatusBar(Widget):
 
     DEFAULT_CSS = ""
 
-    state:   reactive[str] = reactive("disconnected")
-    latency: reactive[int] = reactive(0)
-    nick:    reactive[str] = reactive("")
+    state:      reactive[str]  = reactive("disconnected")
+    latency:    reactive[int]  = reactive(0)
+    nick:       reactive[str]  = reactive("")
+    ptt_active: reactive[bool] = reactive(False)
 
     def render(self) -> Text:
         color = _STATE_COLORS.get(self.state, "#dcddde")
@@ -36,6 +37,8 @@ class StatusBar(Widget):
         markup = f"[{color}]{icon} {self.state.upper()}[/{color}]{lat}"
         if self.nick:
             markup += f"   [bold]{self.nick}[/bold]"
+        if self.ptt_active:
+            markup += r"   [bold red]● MIC[/bold red]"
         return Text.from_markup(markup)
 
     def update(
@@ -49,3 +52,6 @@ class StatusBar(Widget):
             self.latency = latency
         if nick:
             self.nick = nick
+
+    def update_ptt(self, active: bool) -> None:
+        self.ptt_active = active

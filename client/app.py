@@ -9,16 +9,20 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.message import Message
 from textual.reactive import reactive
 
+from client.audio_engine import AUDIO_AVAILABLE, AudioEngine
 from client.commands import HELP_TEXT, ParsedCommand, parse_input
 from client.screens.login_screen import LoginScreen
 from client.ws_worker import WsWorker
+from shared import voice_protocol
 from shared.message_types import C2S, S2C
 
 if TYPE_CHECKING:
@@ -31,12 +35,14 @@ class TraxusApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "Traxus"
     SUB_TITLE = "Terminal Chat"
+    BINDINGS = [Binding("f9", "ptt_toggle", "Toggle PTT", priority=True)]
 
     # ── App-level reactive state ──────────────────────────────────────────────
 
-    connection_state: reactive[str] = reactive("disconnected")
-    current_channel: reactive[str]  = reactive("general")
-    username: reactive[str]          = reactive("")
+    connection_state: reactive[str]    = reactive("disconnected")
+    current_channel: reactive[str]     = reactive("general")
+    current_voice_channel: reactive[str] = reactive("")
+    username: reactive[str]            = reactive("")
 
     # ── Custom messages posted by WsWorker ────────────────────────────────────
 
@@ -51,10 +57,17 @@ class TraxusApp(App):
             self.state  = state
             self.detail = detail
 
+    class AudioFrame(Message):
+        def __init__(self, data: bytes) -> None:
+            super().__init__()
+            self.data = data
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
         self._ws_worker: WsWorker | None = None
+        self._audio_engine: AudioEngine = AudioEngine()
+        self._capture_worker = None
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
@@ -116,6 +129,36 @@ class TraxusApp(App):
                 else:
                     self._local("/create <channel-name>")
 
+            case "vcreate":
+                if cmd.args:
+                    self._send({
+                        "type": C2S.CREATE,
+                        "channel": cmd.args[0].lstrip("#"),
+                        "channel_type": "voice",
+                    })
+                else:
+                    self._local("/vcreate <channel-name>")
+
+            case "vjoin":
+                if not AUDIO_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy not installed.")
+                    return
+                if cmd.args:
+                    ch = cmd.args[0].lstrip("#")
+                    self._send({"type": C2S.VOICE_JOIN, "channel": ch})
+                else:
+                    self._local("/vjoin <channel>")
+
+            case "vleave":
+                if not AUDIO_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy not installed.")
+                    return
+                ch = cmd.args[0].lstrip("#") if cmd.args else self.current_voice_channel
+                if ch:
+                    self._send({"type": C2S.VOICE_LEAVE, "channel": ch})
+                else:
+                    self._local("Not in a voice channel.")
+
             case "help":
                 chat = self._chat()
                 if chat:
@@ -134,6 +177,53 @@ class TraxusApp(App):
                 )
 
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
+
+    def action_ptt_toggle(self) -> None:
+        self.toggle_ptt()
+
+    def toggle_ptt(self) -> None:
+        if not AUDIO_AVAILABLE:
+            self._local("Voice not available: sounddevice/numpy not installed.")
+            return
+        if not self.current_voice_channel:
+            self._local("Join a voice channel first with /vjoin <channel>.")
+            return
+        self._audio_engine.transmitting = not self._audio_engine.transmitting
+        active = self._audio_engine.transmitting
+
+        chat = self._chat()
+        if chat:
+            chat.update_ptt(active)
+
+        if active:
+            loop = asyncio.get_running_loop()
+            self._audio_engine.start(loop)
+            self._capture_worker = self.run_worker(
+                self._audio_engine.capture_loop(
+                    self.current_voice_channel,
+                    self._send_voice_frame,
+                ),
+                name="ptt_capture",
+            )
+        else:
+            self._audio_engine.stop()
+            if self._capture_worker is not None:
+                self._capture_worker.cancel()
+                self._capture_worker = None
+
+    async def _send_voice_frame(self, channel: str, pcm_bytes: bytes) -> None:
+        if self._ws_worker:
+            from shared import voice_protocol as vp
+            self._ws_worker.enqueue_binary(vp.pack_c2s(channel, pcm_bytes))
+
+    # ── Message handlers (posted by WsWorker) ────────────────────────────────
+
+    def on_traxus_app_audio_frame(self, msg: "TraxusApp.AudioFrame") -> None:
+        try:
+            _channel, _username, pcm_bytes = voice_protocol.unpack_s2c(msg.data)
+            self._audio_engine.play(pcm_bytes)   # instant: queues to playback thread
+        except Exception:
+            pass
 
     def on_traxus_app_server_message(self, msg: "TraxusApp.ServerMessage") -> None:
         payload = msg.payload
@@ -198,6 +288,13 @@ class TraxusApp(App):
                 if chat:
                     chat.append_system(f"{who} created #{ch}")
 
+            case "voice_state":
+                channel = payload.get("channel", "")
+                users = payload.get("users", [])
+                self.current_voice_channel = channel if users else ""
+                if chat:
+                    chat.update_voice_state(users)
+
             case "user_list":
                 # Could populate a future members panel; for now just log it
                 pass
@@ -244,5 +341,8 @@ class TraxusApp(App):
 
     def _chat(self) -> "ChatScreen | None":
         from client.screens.chat_screen import ChatScreen
-        screen = self.screen
+        try:
+            screen = self.screen
+        except Exception:
+            return None
         return screen if isinstance(screen, ChatScreen) else None

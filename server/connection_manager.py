@@ -12,6 +12,7 @@ class ConnectedClient:
     user_id: str
     username: str
     channels: set[str] = field(default_factory=set)
+    voice_channels: set[str] = field(default_factory=set)
     connected_at: float = field(default_factory=time.time)
 
 
@@ -51,6 +52,9 @@ class ConnectionManager:
 
     def clients_in_channel(self, channel: str) -> list[ConnectedClient]:
         return [c for c in self._clients.values() if channel in c.channels]
+
+    def voice_clients_in_channel(self, channel: str) -> list[ConnectedClient]:
+        return [c for c in self._clients.values() if channel in c.voice_channels]
 
     def all_clients(self) -> list[ConnectedClient]:
         return list(self._clients.values())

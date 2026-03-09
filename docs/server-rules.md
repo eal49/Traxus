@@ -158,10 +158,47 @@ History is **not persisted** — it resets when the server restarts.
 When a WebSocket connection closes (clean or error):
 
 1. The server removes the client from `ConnectionManager` (freeing the username).
-2. For each channel the client was a member of, the server broadcasts a `system` message: `"<username> disconnected"`.
-3. The server broadcasts an updated `channel_list` to all remaining clients (member counts change).
+2. For each **text** channel the client was a member of, the server broadcasts a `system` message: `"<username> disconnected"`.
+3. For each **voice** channel the client was a member of, the server sends an updated `voice_state` to the remaining voice members (without the disconnected client).
+4. The server broadcasts an updated `channel_list` to all remaining clients (member counts change).
 
 This sequence is idempotent for `None` clients (connections that never completed auth are silently cleaned up).
+
+---
+
+## Voice Channel Rules
+
+### Channel type validation (on `voice_join`)
+
+A `voice_join` message is only accepted for channels with `type: "voice"`.
+
+| Condition | `error.code` |
+|---|---|
+| Channel does not exist | `no_such_channel` |
+| Channel exists but has `type: "text"` | `not_a_voice_channel` |
+
+### Voice channel creation (on `create` with `channel_type: "voice"`)
+
+Voice channels use the same name validation regex as text channels (`^[a-z0-9_-]{1,32}$`). A `channel_type: "voice"` field in the `create` payload causes the server to create a `type: "voice"` channel.
+
+### Broadcast scope — voice events
+
+| Event | S2C type | Recipients |
+|---|---|---|
+| Voice join | `voice_state` | All current voice members of the channel (including the joiner) |
+| Voice leave | `voice_state` | Remaining voice members of the channel |
+| Disconnect (was in voice) | `voice_state` | Remaining voice members of each voice channel |
+| Binary audio frame | binary WebSocket frame | All other voice members of the channel (not echoed to sender, not sent to non-members) |
+
+### `channel_list` type field
+
+The `channel_list` payload now includes a `"type"` field in each channel summary:
+
+```json
+{ "name": "lounge", "topic": "", "member_count": 2, "type": "voice" }
+```
+
+Existing text channels have `"type": "text"`.
 
 ### Nick uniqueness invariant
 
