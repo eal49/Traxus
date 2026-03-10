@@ -86,7 +86,7 @@ class ChatScreen(Screen):
         input_bar.set_channel(channel)
 
     def update_status(self, state: str, latency: int = 0, nick: str = "") -> None:
-        self.query_one("#status-bar", StatusBar).update(state, latency, nick)
+        self.query_one("#status-bar", StatusBar).set_state(state, latency, nick)
 
     def update_ptt(self, active: bool) -> None:
         self.query_one("#status-bar", StatusBar).update_ptt(active)

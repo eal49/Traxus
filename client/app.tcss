@@ -210,3 +210,8 @@ StatusBar {
     padding: 0 1;
     border-top: tall $border-color;
 }
+
+StatusBar.ptt-active {
+    background: #b71c1c;
+    color: white;
+}

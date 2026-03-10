@@ -38,10 +38,15 @@ class StatusBar(Widget):
         if self.nick:
             markup += f"   [bold]{self.nick}[/bold]"
         if self.ptt_active:
-            markup += r"   [bold red]● MIC[/bold red]"
+            markup += r"   [bold white]🎤 PTT ON[/bold white]"
         return Text.from_markup(markup)
 
-    def update(
+    # watch_* fires through Textual's DOM pipeline — guaranteed to repaint.
+    def watch_ptt_active(self, active: bool) -> None:
+        self.set_class(active, "ptt-active")
+        self.refresh()
+
+    def set_state(
         self,
         state: str,
         latency: int = 0,

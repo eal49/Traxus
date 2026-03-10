@@ -481,6 +481,10 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
                 sb.ptt_active,
                 "Status bar must show PTT active after F9",
             )
+            self.assertIn(
+                "ptt-active", sb.classes,
+                "Status bar must carry ptt-active CSS class when PTT is on",
+            )
 
     async def test_f9_without_voice_channel_shows_error_not_crash(self):
         """F9 when not in a voice channel must show an error message, not crash."""
