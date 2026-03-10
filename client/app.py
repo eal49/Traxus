@@ -13,6 +13,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.message import Message
@@ -35,7 +36,7 @@ class TraxusApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "Traxus"
     SUB_TITLE = "Terminal Chat"
-    BINDINGS = [Binding("f9", "ptt_toggle", "Toggle PTT", priority=True)]
+    BINDINGS = []
 
     # ── App-level reactive state ──────────────────────────────────────────────
 
@@ -68,6 +69,10 @@ class TraxusApp(App):
         self._ws_worker: WsWorker | None = None
         self._audio_engine: AudioEngine = AudioEngine()
         self._capture_worker = None
+        self._channel_members: dict[str, list[dict]] = {}
+        self._voice_users: list[dict] = []
+        from client.settings import load_settings
+        self._ptt_key: str = load_settings().get("ptt_key", "f9")
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
@@ -159,12 +164,31 @@ class TraxusApp(App):
                 else:
                     self._local("Not in a voice channel.")
 
+            case "who":
+                members = self._channel_members.get(self.current_channel, [])
+                if members:
+                    names = ", ".join(m.get("username", "?") for m in members)
+                    self._local(f"Members in #{self.current_channel}: {names}")
+                else:
+                    self._local(f"No member info for #{self.current_channel}.")
+
             case "help":
                 chat = self._chat()
                 if chat:
                     chat.append_local("  ── Traxus Commands ──")
                     for line in HELP_TEXT.splitlines():
                         chat.append_local(line)
+
+            case "settings":
+                from client.screens.settings_screen import SettingsScreen
+                from client.settings import save_settings
+
+                def _on_settings_result(new_key: str | None) -> None:
+                    if new_key is not None:
+                        self._ptt_key = new_key
+                        save_settings({"ptt_key": new_key})
+
+                self.push_screen(SettingsScreen(), _on_settings_result)
 
             case "quit":
                 if self._ws_worker:
@@ -177,6 +201,20 @@ class TraxusApp(App):
                 )
 
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == self._ptt_key:
+            event.stop()
+            self.toggle_ptt()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if self._ptt_key.startswith("mouse"):
+            try:
+                if event.button == int(self._ptt_key[5:]):
+                    event.stop()
+                    self.toggle_ptt()
+            except ValueError:
+                pass
 
     def action_ptt_toggle(self) -> None:
         self.toggle_ptt()
@@ -257,6 +295,8 @@ class TraxusApp(App):
                     chat.set_active_channel(channel)
                     chat.load_history(payload.get("history", []))
                     chat.append_system(f"Joined #{channel}")
+                    members = self._channel_members.get(channel, [])
+                    chat.update_members(members)
 
             case "left":
                 channel = payload.get("channel", "")
@@ -268,8 +308,10 @@ class TraxusApp(App):
                     chat.append_chat(payload)
 
             case "system":
+                content = payload.get("content", "")
                 if chat:
-                    chat.append_system(payload.get("content", ""))
+                    chat.append_system(content)
+                self._update_members_from_system(content, chat)
 
             case "nick_changed":
                 old = payload.get("old_nick", "")
@@ -281,6 +323,16 @@ class TraxusApp(App):
                     self.username = new
                     if chat:
                         chat.update_status(self.connection_state, nick=new)
+                # Update member lists
+                changed = False
+                for members in self._channel_members.values():
+                    for m in members:
+                        if m.get("username") == old:
+                            m["username"] = new
+                            changed = True
+                if changed and chat:
+                    members = self._channel_members.get(self.current_channel, [])
+                    chat.update_members(members)
 
             case "channel_created":
                 ch  = payload.get("channel", "")
@@ -292,12 +344,17 @@ class TraxusApp(App):
                 channel = payload.get("channel", "")
                 users = payload.get("users", [])
                 self.current_voice_channel = channel if users else ""
+                self._voice_users = users
                 if chat:
                     chat.update_voice_state(users)
+                    chat.update_member_voice(users)
 
             case "user_list":
-                # Could populate a future members panel; for now just log it
-                pass
+                channel = payload.get("channel", "")
+                users = payload.get("users", [])
+                self._channel_members[channel] = users
+                if channel == self.current_channel and chat:
+                    chat.update_members(users)
 
             case "pong":
                 ts = payload.get("ts", 0.0)
@@ -346,3 +403,41 @@ class TraxusApp(App):
         except Exception:
             return None
         return screen if isinstance(screen, ChatScreen) else None
+
+    def _update_members_from_system(self, content: str, chat: "ChatScreen | None") -> None:
+        import re
+        # "alice joined #general"
+        m = re.match(r"^(\S+) joined #(\S+)$", content)
+        if m:
+            username, channel = m.group(1), m.group(2)
+            members = self._channel_members.get(channel, [])
+            if not any(u.get("username") == username for u in members):
+                members.append({"user_id": "", "username": username})
+                self._channel_members[channel] = members
+            if channel == self.current_channel and chat:
+                chat.update_members(members)
+            return
+
+        # "alice left #general"
+        m = re.match(r"^(\S+) left #(\S+)$", content)
+        if m:
+            username, channel = m.group(1), m.group(2)
+            members = self._channel_members.get(channel, [])
+            members = [u for u in members if u.get("username") != username]
+            self._channel_members[channel] = members
+            if channel == self.current_channel and chat:
+                chat.update_members(members)
+            return
+
+        # "alice disconnected"
+        m = re.match(r"^(\S+) disconnected$", content)
+        if m:
+            username = m.group(1)
+            refreshed = False
+            for ch, members in self._channel_members.items():
+                before = len(members)
+                members[:] = [u for u in members if u.get("username") != username]
+                if len(members) < before and ch == self.current_channel:
+                    refreshed = True
+            if refreshed and chat:
+                chat.update_members(self._channel_members.get(self.current_channel, []))

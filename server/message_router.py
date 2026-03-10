@@ -146,18 +146,21 @@ class MessageRouter:
             "history": history,
         })
 
-        # Send member list
+        # Build updated member list (includes the newly joined client)
         members = [
             {"user_id": c.user_id, "username": c.username}
             for c in self._conn.clients_in_channel(channel)
         ]
-        await self._send(ws, {
+        user_list_payload = {
             "type": S2C.USER_LIST,
             "channel": channel,
             "users": members,
-        })
+        }
+        # Broadcast to ALL channel members so every client's panel stays in sync
+        for c in self._conn.clients_in_channel(channel):
+            await self._conn.send_to(c.user_id, user_list_payload)
 
-        # Notify others
+        # Notify others of the join event
         await self._conn.broadcast_to_channel(channel, {
             "type": S2C.SYSTEM,
             "channel": channel,
@@ -174,6 +177,17 @@ class MessageRouter:
 
         client.channels.discard(channel)
         await self._send(ws, {"type": S2C.LEFT, "channel": channel})
+
+        # Broadcast updated member list to remaining channel members
+        members = [
+            {"user_id": c.user_id, "username": c.username}
+            for c in self._conn.clients_in_channel(channel)
+        ]
+        await self._conn.broadcast_to_channel(channel, {
+            "type": S2C.USER_LIST,
+            "channel": channel,
+            "users": members,
+        })
 
         await self._conn.broadcast_to_channel(channel, {
             "type": S2C.SYSTEM,
@@ -364,6 +378,16 @@ class MessageRouter:
                 "channel": channel,
                 "content": f"{client.username} disconnected",
                 "ts": time.time(),
+            })
+            # Broadcast updated member list to remaining channel members
+            members = [
+                {"user_id": c.user_id, "username": c.username}
+                for c in self._conn.clients_in_channel(channel)
+            ]
+            await self._conn.broadcast_to_channel(channel, {
+                "type": S2C.USER_LIST,
+                "channel": channel,
+                "users": members,
             })
 
         for channel in voice_channels:

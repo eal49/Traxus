@@ -1,0 +1,6 @@
+# Replace YOUR-NAME.duckdns.org with your actual Duck DNS subdomain.
+# Caddy will automatically obtain and renew a Let's Encrypt TLS certificate.
+
+YOUR-NAME.duckdns.org {
+    reverse_proxy localhost:8765
+}

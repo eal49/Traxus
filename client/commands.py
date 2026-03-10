@@ -39,12 +39,14 @@ HELP_TEXT = """\
   /vcreate <name>     Create a new voice channel
   /vjoin <channel>    Join a voice channel
   /vleave [channel]   Leave current (or specified) voice channel
-  F9                  Toggle push-to-talk (mic) in a voice channel
+  F9 (default)        Toggle push-to-talk (mic) — key or mouse button, change via /settings
+  /who                List members in the current channel
+  /settings           Open the settings menu (configure PTT key, etc.)
   /help               Show this help
   /quit               Disconnect and exit\
 """
 
 KNOWN_COMMANDS = {
-    "join", "leave", "nick", "channels", "create", "help", "quit",
-    "vcreate", "vjoin", "vleave",
+    "join", "leave", "nick", "channels", "create", "who", "help", "quit",
+    "vcreate", "vjoin", "vleave", "settings",
 }

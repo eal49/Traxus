@@ -158,6 +158,15 @@ ChannelSidebar ListItem.--highlight {
     text-style: bold;
 }
 
+/* ── MemberPanel ────────────────────────────────────────────────────────── */
+
+MemberPanel {
+    width: 20;
+    background: $surface;
+    border-left: tall $border-color;
+    padding: 1 0 0 0;
+}
+
 /* ── MessageView ─────────────────────────────────────────────────────────── */
 
 MessageView {

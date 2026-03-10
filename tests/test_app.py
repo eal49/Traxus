@@ -393,20 +393,23 @@ class TestAudioFrameDispatch(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, ChatScreen)
 
 
-# ── F9 PTT binding ────────────────────────────────────────────────────────────
+# ── PTT key binding ───────────────────────────────────────────────────────────
 
 class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
     """
-    F9 must trigger toggle_ptt() regardless of which widget is focused.
+    The PTT key (default F9) must trigger toggle_ptt() regardless of which
+    widget is focused.
 
-    The binding is declared on TraxusApp with priority=True, which means
-    Textual checks it before dispatching the key to the focused Input widget.
-    These tests prove that priority=True wiring actually works end-to-end.
+    PTT is handled by an on_key handler on TraxusApp.  F9 is not consumed by
+    the Input widget, so it naturally bubbles up to the App handler.
+    These tests prove the on_key wiring works end-to-end.
     """
 
     async def _on_chat(self, app, pilot):
         await app.switch_screen(ChatScreen())
         await pilot.pause()
+        # Ensure _ptt_key is "f9" regardless of the system settings file.
+        app._ptt_key = "f9"
 
     async def test_f9_sets_transmitting_true_when_in_voice_channel(self):
         """First F9 press while in a voice channel enables PTT."""
@@ -509,8 +512,9 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
     async def test_f9_fires_even_when_input_is_focused(self):
         """
-        The Input widget normally absorbs all key events.
-        priority=True on the binding must bypass this.
+        F9 is not consumed by the Input widget (it is not a printable character
+        or a special key Input handles), so it bubbles up to the App's on_key
+        handler and triggers PTT even when the Input widget has focus.
         """
         from unittest.mock import patch, MagicMock
         from textual.widgets import Input
@@ -536,8 +540,50 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 app._audio_engine.transmitting,
                 "F9 must fire even when the Input widget has focus; "
-                "priority=True binding is required for this to work",
+                "the App-level on_key handler must receive the bubbled event",
             )
+
+
+# ── /settings command ─────────────────────────────────────────────────────────
+
+class TestSettingsCommand(unittest.IsolatedAsyncioTestCase):
+    """/settings must push a modal without crashing and must not be treated as
+    an unknown command."""
+
+    async def _on_chat(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+
+    async def test_settings_command_is_recognised(self):
+        """Dispatching /settings must not print 'Unknown command'."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+
+            app.handle_input("/settings")
+            await pilot.pause()
+
+            # Unknown commands append an error line; /settings must not do this.
+            # (The modal being open means no error was printed.)
+            lines_added = _line_count(mv) - before
+            self.assertEqual(
+                lines_added, 0,
+                "/settings must not write an 'Unknown command' error to the view",
+            )
+
+    async def test_settings_command_does_not_crash(self):
+        """/settings must not raise or leave the app in a broken state."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+
+            app.handle_input("/settings")
+            await pilot.pause()
+
+            # App is still running
+            self.assertIsNotNone(app.screen)
 
 
 if __name__ == "__main__":

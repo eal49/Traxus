@@ -460,6 +460,8 @@ Members of a channel. Sent to the joining client immediately after `joined`.
 | `channel` | string | Channel this list applies to. |
 | `users` | array | Array of `{ user_id, username }` objects. |
 
+**Client handling:** The client uses this message to populate the right-side member panel for the specified channel. Between `user_list` deliveries, the client tracks membership changes incrementally from `system` join/leave/disconnect messages and `nick_changed` broadcasts.
+
 ---
 
 ### error

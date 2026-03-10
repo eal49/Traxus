@@ -5,7 +5,7 @@ The project SHALL contain `docs/commands.md` documenting every client slash comm
 
 #### Scenario: Document covers all seven commands
 - **WHEN** a developer opens `docs/commands.md`
-- **THEN** they SHALL find entries for /join, /leave, /nick, /channels, /create, /help, and /quit
+- **THEN** they SHALL find entries for /join, /leave, /nick, /channels, /create, /help, /quit, and /who
 
 #### Scenario: Each command entry is complete
 - **WHEN** a developer reads any single command entry
@@ -60,9 +60,43 @@ The `docs/commands.md` file SHALL describe how client-side parsing works so alte
 
 ---
 
+### Requirement: /settings command documented
+The client SHALL support a `/settings` command. `docs/commands.md` and `/help` output SHALL document it.
+
+#### Scenario: /help includes /settings
+- **WHEN** the user types `/help`
+- **THEN** the output SHALL include a line for `/settings` describing it as opening the settings menu
+
+#### Scenario: docs/commands.md documents /settings
+- **WHEN** a developer opens `docs/commands.md`
+- **THEN** they SHALL find an entry for `/settings` with syntax, description (client-only, no server message), and a note that it opens a modal menu for configuring client options such as the PTT key
+
+---
+
 ### Requirement: PTT keybinding documented in help output
-The `/help` command output and `docs/commands.md` SHALL document the Ctrl+M push-to-talk toggle keybinding.
+The `/help` command output and `docs/commands.md` SHALL document the push-to-talk toggle keybinding, noting that it defaults to F9 and can be changed via `/settings`.
 
 #### Scenario: /help mentions PTT
 - **WHEN** the user runs /help
-- **THEN** the output includes a line describing Ctrl+M as the PTT toggle
+- **THEN** the output includes a line describing F9 as the default PTT toggle and mentioning `/settings` to change it
+
+---
+
+### Requirement: /who command documented and implemented
+The client SHALL support a `/who` command that displays the current channel's member list inline in the message view.
+
+#### Scenario: /who prints member list
+- **WHEN** the user types `/who` while in a text channel
+- **THEN** the client SHALL display a system message listing all members of the active channel, without sending any message to the server
+
+#### Scenario: /who with no members
+- **WHEN** the user types `/who` and no member data is available for the active channel
+- **THEN** the client SHALL display a system message stating no member information is available
+
+#### Scenario: /help includes /who
+- **WHEN** the user types `/help`
+- **THEN** the help output SHALL include a line for `/who` describing it as listing current channel members
+
+#### Scenario: docs/commands.md documents /who
+- **WHEN** a developer opens `docs/commands.md`
+- **THEN** they SHALL find an entry for `/who` with syntax, description (client-only, no server message), and behavior

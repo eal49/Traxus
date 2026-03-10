@@ -7,6 +7,7 @@ from textual.widgets import Header
 
 from client.widgets.channel_sidebar import ChannelSidebar
 from client.widgets.input_bar import InputBar
+from client.widgets.member_panel import MemberPanel
 from client.widgets.message_view import MessageView
 from client.widgets.status_bar import StatusBar
 from textual.containers import Horizontal, Vertical
@@ -25,6 +26,7 @@ class ChatScreen(Screen):
             with Vertical(id="main-panel"):
                 yield MessageView(id="messages", wrap=True, markup=True)
                 yield InputBar(id="input-area")
+            yield MemberPanel(id="members")
         yield StatusBar(id="status-bar")
 
     def on_mount(self) -> None:
@@ -33,6 +35,12 @@ class ChatScreen(Screen):
         # before this screen was mounted and would have been silently dropped.
         from shared.message_types import C2S
         self.app._send({"type": C2S.LIST_CHANNELS})  # type: ignore[attr-defined]
+        # Populate member panel from cached data — the user_list message may
+        # have arrived before the screen widgets were fully mounted, causing
+        # update_members() to silently fail inside the try/except.
+        current = self.app.current_channel  # type: ignore[attr-defined]
+        members = self.app._channel_members.get(current, [])  # type: ignore[attr-defined]
+        self.update_members(members)
 
     # ── Event delegation from widgets ────────────────────────────────────────
 
@@ -91,17 +99,24 @@ class ChatScreen(Screen):
     def update_ptt(self, active: bool) -> None:
         self.query_one("#status-bar", StatusBar).update_ptt(active)
 
+    def update_members(self, members: list[dict]) -> None:
+        try:
+            self.query_one("#members", MemberPanel).set_members(members)
+        except Exception:
+            pass
+
+    def update_member_voice(self, voice_users: list[dict]) -> None:
+        try:
+            self.query_one("#members", MemberPanel).update_voice(voice_users)
+        except Exception:
+            pass
+
     def update_voice_state(self, users: list[dict]) -> None:
         if users:
             names = ", ".join(u.get("username", "?") for u in users)
             self.append_system(f"Voice members: {names}")
         else:
             self.append_system("Voice channel: no members")
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button == 4:
-            self.app.toggle_ptt()  # type: ignore[attr-defined]
-            event.stop()
 
     def action_ptt_toggle(self) -> None:
         self.app.toggle_ptt()  # type: ignore[attr-defined]

@@ -333,16 +333,58 @@ Leave the current (or specified) voice channel.
 
 ---
 
-## Push-to-Talk (PTT) — F9
+## /who
+
+List members of the current text channel.
+
+```
+/who
+```
+
+No arguments. This is a **client-only** command — nothing is sent to the server.
+
+**Client effect:** Prints the member list for the active channel inline as a system message. The list is populated from `user_list` messages received when joining a channel and updated incrementally from join/leave/disconnect events.
+
+If no member information is available for the channel (e.g. the user has not joined yet), an informational message is shown instead.
+
+---
+
+## Push-to-Talk (PTT)
 
 Toggle microphone transmission on/off while in a voice channel.
 
 | Input | Action |
 |---|---|
-| `F9` | Toggle PTT — starts or stops sending mic audio to the voice channel |
+| `F9` *(default)* | Toggle PTT — starts or stops sending mic audio to the voice channel |
 
 **Requirements:** Must be joined to a voice channel with `/vjoin` first. `sounddevice` and `numpy` must be installed.
 
 **Status bar:** When PTT is active, the status bar shows `● MIC` in red.
 
-**Note:** This is toggle mode (not hold-to-talk). `F9` is a priority binding that fires regardless of which widget is focused.
+**Note:** This is toggle mode (not hold-to-talk). The PTT binding defaults to F9 and can be changed to any keyboard key or mouse button via `/settings`. The binding fires regardless of which widget is focused.
+
+**Mouse button binding:** PTT can be bound to a mouse button (stored as `mouse1` or `mouse2`). Only left click (`mouse1`) and middle click (`mouse2`) are reliably forwarded by terminal emulators. Right click and side buttons are captured by the terminal itself and will not reach Traxus. Binding to left click conflicts with normal UI interaction, so middle click (`mouse2`) is the recommended mouse PTT button.
+
+---
+
+## /settings
+
+Open the client settings menu.
+
+```
+/settings
+```
+
+No arguments.
+
+**Client effect:** Opens a modal settings screen. **Nothing is sent to the server.**
+
+**Menu items:**
+
+| Item | Description |
+|---|---|
+| `PTT Key` | Rebind the push-to-talk key or button. Press any key or click a mouse button to capture it, or Escape to cancel. |
+
+**Selecting PTT Key:** A capture screen appears showing the current binding. Press any key or click a mouse button to set it as the new PTT binding immediately (no restart required). The setting is saved to `~/.config/traxus/settings.json` and restored on next launch. Only left click (`mouse1`) and middle click (`mouse2`) are reliably forwarded by terminal emulators — right click and side buttons will not be captured. **Caution:** binding to left click (`mouse1`) conflicts with normal UI interaction; middle click (`mouse2`) is recommended.
+
+The menu is extensible — future settings will appear as additional items in the same modal.

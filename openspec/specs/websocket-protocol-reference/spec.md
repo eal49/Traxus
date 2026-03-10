@@ -77,3 +77,12 @@ The `docs/protocol.md` file SHALL specify the transport layer, encoding, and mes
 #### Scenario: Error code listed
 - **WHEN** a developer reads the error codes table
 - **THEN** they find `not_a_voice_channel` listed with trigger: "voice_join targeting a text channel"
+
+---
+
+### Requirement: Client handling of user_list documented
+`docs/protocol.md` SHALL document that the client uses the `user_list` S2C message to populate the member panel, not just acknowledge it.
+
+#### Scenario: user_list client handling noted
+- **WHEN** a developer reads the `user_list` entry in `docs/protocol.md`
+- **THEN** they SHALL find a note stating the client uses the `users` array to populate the right-side member panel for the specified channel

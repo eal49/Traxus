@@ -110,8 +110,10 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
                 )
 
                 # ── 4. Press F9 ───────────────────────────────────────────────
+                # Ensure _ptt_key is "f9" regardless of the system settings file.
+                app._ptt_key = "f9"
                 # Give the Input widget focus — normal chat state — to prove
-                # the priority=True binding fires despite Input absorbing keys.
+                # the on_key handler fires despite Input absorbing keys.
                 app.screen.query_one("#message-input", Input).focus()
                 await pilot.pause(0.1)
                 await pilot.press("f9")
