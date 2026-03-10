@@ -5,7 +5,7 @@
 **Run the full test suite after every edit, no exceptions.**
 
 ```bash
-python -m pytest tests/ -v
+python -m unittest discover -s tests -v
 ```
 
 All tests must pass before considering any change complete. If a test breaks,
@@ -231,9 +231,15 @@ Python 3.14 is the target interpreter (`python` on PATH). Voice requires
 
 ## Test suite
 
+The test suite uses **`unittest`** (stdlib). Run it with:
+
 ```bash
-python -m pytest tests/ -v
+python -m unittest discover -s tests -v
 ```
+
+Do **not** use pytest. All test classes extend `unittest.TestCase` (or
+`unittest.IsolatedAsyncioTestCase` for async tests). New tests must follow the
+same pattern.
 
 | Test file | What it covers |
 |---|---|
@@ -247,4 +253,4 @@ python -m pytest tests/ -v
 | `test_ptt_e2e.py` | Full integration: real server subprocess + Textual pilot |
 | `test_voice_protocol.py` | Binary frame pack/unpack round-trip |
 
-**Mandatory:** every PR / edit must leave `pytest tests/ -v` fully green.
+**Mandatory:** every edit must leave `python -m unittest discover -s tests -v` fully green.
