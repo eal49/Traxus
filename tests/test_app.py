@@ -478,7 +478,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
             sb = app.screen.query_one("#status-bar", StatusBar)
             self.assertTrue(
-                sb.ptt_active,
+                sb._ptt_active,
                 "Status bar must show PTT active after F9",
             )
             self.assertIn(

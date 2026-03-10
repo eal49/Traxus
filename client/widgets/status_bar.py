@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from rich.text import Text
-from textual.reactive import reactive
-from textual.widget import Widget
+from textual.widgets import Static
 
 
 _STATE_COLORS = {
@@ -20,31 +18,32 @@ _STATE_ICONS = {
 }
 
 
-class StatusBar(Widget):
+class StatusBar(Static):
     """Bottom status strip showing connection state, latency, and nick."""
 
     DEFAULT_CSS = ""
 
-    state:      reactive[str]  = reactive("disconnected")
-    latency:    reactive[int]  = reactive(0)
-    nick:       reactive[str]  = reactive("")
-    ptt_active: reactive[bool] = reactive(False)
+    def __init__(self, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        self._state = "disconnected"
+        self._latency = 0
+        self._nick = ""
+        self._ptt_active = False
 
-    def render(self) -> Text:
-        color = _STATE_COLORS.get(self.state, "#dcddde")
-        icon  = _STATE_ICONS.get(self.state, "?")
-        lat   = f"  {self.latency}ms" if self.state == "connected" else ""
-        markup = f"[{color}]{icon} {self.state.upper()}[/{color}]{lat}"
-        if self.nick:
-            markup += f"   [bold]{self.nick}[/bold]"
-        if self.ptt_active:
+    def _build_markup(self) -> str:
+        color = _STATE_COLORS.get(self._state, "#dcddde")
+        icon  = _STATE_ICONS.get(self._state, "?")
+        lat   = f"  {self._latency}ms" if self._state == "connected" else ""
+        markup = f"[{color}]{icon} {self._state.upper()}[/{color}]{lat}"
+        if self._nick:
+            markup += f"   [bold]{self._nick}[/bold]"
+        if self._ptt_active:
             markup += r"   [bold white]🎤 PTT ON[/bold white]"
-        return Text.from_markup(markup)
+        return markup
 
-    # watch_* fires through Textual's DOM pipeline — guaranteed to repaint.
-    def watch_ptt_active(self, active: bool) -> None:
-        self.set_class(active, "ptt-active")
-        self.refresh()
+    def _refresh_content(self) -> None:
+        """Push new markup to Static.update() — guaranteed to repaint."""
+        self.update(self._build_markup())
 
     def set_state(
         self,
@@ -52,11 +51,14 @@ class StatusBar(Widget):
         latency: int = 0,
         nick: str = "",
     ) -> None:
-        self.state = state
+        self._state = state
         if latency:
-            self.latency = latency
+            self._latency = latency
         if nick:
-            self.nick = nick
+            self._nick = nick
+        self._refresh_content()
 
     def update_ptt(self, active: bool) -> None:
-        self.ptt_active = active
+        self._ptt_active = active
+        self.set_class(active, "ptt-active")
+        self._refresh_content()

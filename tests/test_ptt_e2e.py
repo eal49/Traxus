@@ -126,7 +126,7 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
 
                 sb = app.screen.query_one("#status-bar", StatusBar)
                 self.assertTrue(
-                    sb.ptt_active,
+                    sb._ptt_active,
                     "StatusBar.ptt_active must be True after F9 — "
                     "toggle_ptt() must call chat.update_ptt(True)",
                 )
@@ -139,7 +139,7 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(0.3)
 
                 self.assertFalse(app._audio_engine.transmitting, "Second F9 must turn PTT off")
-                self.assertFalse(sb.ptt_active, "Status bar must clear ● MIC after PTT off")
+                self.assertFalse(sb._ptt_active, "Status bar must clear ● MIC after PTT off")
 
 
 if __name__ == "__main__":
