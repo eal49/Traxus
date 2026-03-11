@@ -56,8 +56,8 @@ sudo apt update && sudo apt install -y python3 python3-pip python3-venv git
 Clone the repository and create a virtual environment:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/traxus.git
-cd traxus
+git clone https://github.com/YOUR_USERNAME/traxus.git Traxus
+cd Traxus
 python3 -m venv .venv
 .venv/bin/pip install -r deploy/requirements-server.txt
 ```
@@ -98,7 +98,7 @@ sudo systemctl enable --now caddy
 sudo systemctl status caddy   # should show "active (running)"
 ```
 
-Caddy will automatically obtain a Let's Encrypt certificate on first startup. Port 80 must be open for the HTTP-01 challenge to succeed.
+Caddy will automatically obtain a Let's Encrypt certificate on first startup. Ports 80 and 443 must be reachable from the internet — complete Section 6 (Firewall) first if you have not already done so.
 
 ---
 
@@ -131,6 +131,36 @@ sudo ufw deny 8765/tcp
 sudo ufw enable
 sudo ufw status
 ```
+
+**Oracle Cloud iptables fix (required)**
+
+Oracle Cloud Ubuntu images ship with an iptables REJECT rule that fires *before* UFW's
+rules, blocking all traffic except SSH even when UFW is correctly configured. Verify and
+remove it:
+
+```bash
+# Confirm the REJECT rule exists (look for a REJECT line before the ufw-* rules)
+sudo iptables -L INPUT -n --line-numbers
+```
+
+You will see something like:
+
+```
+num  target     prot opt source          destination
+...
+5    REJECT     0    --  0.0.0.0/0       0.0.0.0/0    reject-with icmp-host-prohibited
+6    ufw-before-logging-input  ...
+```
+
+Delete that REJECT rule and persist the change:
+
+```bash
+sudo iptables -D INPUT 5
+sudo netfilter-persistent save
+```
+
+After this, UFW's ALLOW rules for ports 80 and 443 take effect and Caddy can complete
+the ACME challenge.
 
 ---
 
@@ -171,7 +201,7 @@ in the server URL field on the login screen.
 ## Updating the Server
 
 ```bash
-cd ~/traxus
+cd ~/Traxus
 git pull
 sudo systemctl restart traxus-server
 ```

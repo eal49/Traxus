@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/traxus
-ExecStart=/home/ubuntu/traxus/.venv/bin/python -m server.main
+WorkingDirectory=/home/ubuntu/Traxus
+ExecStart=/home/ubuntu/Traxus/.venv/bin/python -m server.main
 Environment=TRAXUS_HOST=127.0.0.1
 Environment=TRAXUS_PORT=8765
 Restart=on-failure
