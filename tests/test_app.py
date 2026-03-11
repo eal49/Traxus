@@ -408,8 +408,9 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
     async def _on_chat(self, app, pilot):
         await app.switch_screen(ChatScreen())
         await pilot.pause()
-        # Ensure _ptt_key is "f9" regardless of the system settings file.
+        # Ensure _ptt_key and _ptt_mode are deterministic regardless of the settings file.
         app._ptt_key = "f9"
+        app._ptt_mode = "toggle"
 
     async def test_f9_sets_transmitting_true_when_in_voice_channel(self):
         """First F9 press while in a voice channel enables PTT."""

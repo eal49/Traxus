@@ -29,6 +29,9 @@ from shared.message_types import C2S, S2C
 if TYPE_CHECKING:
     from client.screens.chat_screen import ChatScreen
 
+PTT_HOLD_DEBOUNCE_MS = 300
+PTT_HOLD_INITIAL_DEBOUNCE_MS = 800  # > Windows initial key-repeat delay (~500 ms)
+
 
 class TraxusApp(App):
     """Root application."""
@@ -69,10 +72,13 @@ class TraxusApp(App):
         self._ws_worker: WsWorker | None = None
         self._audio_engine: AudioEngine = AudioEngine()
         self._capture_worker = None
+        self._ptt_debounce_task: asyncio.Task | None = None
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
         from client.settings import load_settings
-        self._ptt_key: str = load_settings().get("ptt_key", "f9")
+        settings = load_settings()
+        self._ptt_key: str = settings.get("ptt_key", "f9")
+        self._ptt_mode: str = settings.get("ptt_mode", "toggle")
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
@@ -186,7 +192,7 @@ class TraxusApp(App):
                 def _on_settings_result(new_key: str | None) -> None:
                     if new_key is not None:
                         self._ptt_key = new_key
-                        save_settings({"ptt_key": new_key})
+                        save_settings({"ptt_key": self._ptt_key, "ptt_mode": self._ptt_mode})
 
                 self.push_screen(SettingsScreen(), _on_settings_result)
 
@@ -205,14 +211,33 @@ class TraxusApp(App):
     def on_key(self, event: events.Key) -> None:
         if event.key == self._ptt_key:
             event.stop()
-            self.toggle_ptt()
+            if self._ptt_mode == "hold" and not self._ptt_key.startswith("mouse"):
+                if not self._audio_engine.transmitting:
+                    self.start_ptt()
+                    self._arm_ptt_debounce(PTT_HOLD_INITIAL_DEBOUNCE_MS)
+                else:
+                    self._arm_ptt_debounce()  # key-repeat: reset to short timeout
+            else:
+                self.toggle_ptt()
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if self._ptt_key.startswith("mouse"):
             try:
                 if event.button == int(self._ptt_key[5:]):
                     event.stop()
-                    self.toggle_ptt()
+                    if self._ptt_mode == "hold":
+                        self.start_ptt()
+                    else:
+                        self.toggle_ptt()
+            except ValueError:
+                pass
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._ptt_mode == "hold" and self._ptt_key.startswith("mouse"):
+            try:
+                if event.button == int(self._ptt_key[5:]):
+                    event.stop()
+                    self.stop_ptt()
             except ValueError:
                 pass
 
@@ -220,34 +245,63 @@ class TraxusApp(App):
         self.toggle_ptt()
 
     def toggle_ptt(self) -> None:
+        if self._audio_engine.transmitting:
+            self.stop_ptt()
+        else:
+            self.start_ptt()
+
+    def start_ptt(self) -> None:
         if not AUDIO_AVAILABLE:
             self._local("Voice not available: sounddevice/numpy not installed.")
             return
         if not self.current_voice_channel:
             self._local("Join a voice channel first with /vjoin <channel>.")
             return
-        self._audio_engine.transmitting = not self._audio_engine.transmitting
-        active = self._audio_engine.transmitting
-
+        if self._audio_engine.transmitting:
+            return
+        self._audio_engine.transmitting = True
         chat = self._chat()
         if chat:
-            chat.update_ptt(active)
+            chat.update_ptt(True)
+        loop = asyncio.get_running_loop()
+        self._audio_engine.start(loop)
+        self._capture_worker = self.run_worker(
+            self._audio_engine.capture_loop(
+                self.current_voice_channel,
+                self._send_voice_frame,
+            ),
+            name="ptt_capture",
+        )
 
-        if active:
-            loop = asyncio.get_running_loop()
-            self._audio_engine.start(loop)
-            self._capture_worker = self.run_worker(
-                self._audio_engine.capture_loop(
-                    self.current_voice_channel,
-                    self._send_voice_frame,
-                ),
-                name="ptt_capture",
-            )
-        else:
-            self._audio_engine.stop()
-            if self._capture_worker is not None:
-                self._capture_worker.cancel()
-                self._capture_worker = None
+    def stop_ptt(self) -> None:
+        if not self._audio_engine.transmitting:
+            return
+        self._cancel_ptt_debounce()
+        self._audio_engine.transmitting = False
+        self._audio_engine.stop()
+        if self._capture_worker is not None:
+            self._capture_worker.cancel()
+            self._capture_worker = None
+        chat = self._chat()
+        if chat:
+            chat.update_ptt(False)
+
+    def _arm_ptt_debounce(self, delay_ms: int = PTT_HOLD_DEBOUNCE_MS) -> None:
+        self._cancel_ptt_debounce()
+        loop = asyncio.get_running_loop()
+        self._ptt_debounce_task = loop.create_task(self._ptt_debounce_coro(delay_ms))
+
+    def _cancel_ptt_debounce(self) -> None:
+        if self._ptt_debounce_task is not None and not self._ptt_debounce_task.done():
+            self._ptt_debounce_task.cancel()
+        self._ptt_debounce_task = None
+
+    async def _ptt_debounce_coro(self, delay_ms: int = PTT_HOLD_DEBOUNCE_MS) -> None:
+        try:
+            await asyncio.sleep(delay_ms / 1000)
+            self.stop_ptt()
+        except asyncio.CancelledError:
+            pass
 
     async def _send_voice_frame(self, channel: str, pcm_bytes: bytes) -> None:
         if self._ws_worker:

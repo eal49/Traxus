@@ -17,6 +17,7 @@ _SETTINGS_FILE = _CONFIG_DIR / "settings.json"
 
 _DEFAULTS: dict = {
     "ptt_key": "f9",
+    "ptt_mode": "toggle",
 }
 
 

@@ -22,6 +22,14 @@ The settings modal SHALL present a list of setting categories that the user can 
 - **WHEN** the settings modal opens
 - **THEN** the menu SHALL contain an entry labelled "PTT Key"
 
+#### Scenario: PTT Mode item is present
+- **WHEN** the settings modal opens
+- **THEN** the menu SHALL contain an entry labelled "PTT Mode" showing the current mode (Toggle or Hold)
+
+#### Scenario: Selecting PTT Mode cycles the mode
+- **WHEN** the user selects "PTT Mode" from the settings menu
+- **THEN** the mode SHALL cycle between Toggle and Hold and the change SHALL be saved immediately
+
 #### Scenario: Selecting PTT Key opens key capture screen
 - **WHEN** the user selects "PTT Key" from the settings menu
 - **THEN** a key capture screen SHALL appear prompting the user to press any key or click a mouse button

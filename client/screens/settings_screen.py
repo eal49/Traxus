@@ -19,9 +19,12 @@ class SettingsScreen(ModalScreen[str | None]):
     BINDINGS = [("escape", "dismiss", "Close")]
 
     def compose(self) -> ComposeResult:
+        current_mode = getattr(self.app, "_ptt_mode", "toggle")
+        mode_label = "Toggle" if current_mode == "toggle" else "Hold"
         yield Label("Settings", id="settings-title")
         yield ListView(
             ListItem(Label("PTT Key"), id="item-ptt-key"),
+            ListItem(Label(f"PTT Mode: {mode_label}"), id="item-ptt-mode"),
             id="settings-list",
         )
 
@@ -29,12 +32,28 @@ class SettingsScreen(ModalScreen[str | None]):
         if event.item.id == "item-ptt-key":
             current_key: str = getattr(self.app, "_ptt_key", "f9")
             self.app.push_screen(PttKeyScreen(current_key), self._on_ptt_key)
+        elif event.item.id == "item-ptt-mode":
+            self._cycle_ptt_mode()
 
     def _on_ptt_key(self, new_key: str | None) -> None:
         """Callback from PttKeyScreen.  Forward the chosen key to the app."""
         if new_key is not None:
             self.dismiss(new_key)
         # else: user cancelled — stay on SettingsScreen
+
+    def _cycle_ptt_mode(self) -> None:
+        current = getattr(self.app, "_ptt_mode", "toggle")
+        new_mode = "hold" if current == "toggle" else "toggle"
+        self.app._ptt_mode = new_mode
+        from client.settings import save_settings
+        save_settings({
+            "ptt_key": getattr(self.app, "_ptt_key", "f9"),
+            "ptt_mode": new_mode,
+        })
+        mode_label = "Toggle" if new_mode == "toggle" else "Hold"
+        self.query_one("#item-ptt-mode", ListItem).query_one(Label).update(
+            f"PTT Mode: {mode_label}"
+        )
 
 
 class PttKeyScreen(ModalScreen[str | None]):
