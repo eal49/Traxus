@@ -33,7 +33,7 @@ In VAD mode, the microphone input stream SHALL remain open continuously while th
 - **THEN** no additional stream SHALL be opened (stream already open from vjoin)
 
 ### Requirement: VAD sensitivity is user-configurable
-The VAD RMS energy threshold SHALL be adjustable via four named levels persisted to settings.
+The VAD RMS energy threshold SHALL be adjustable via four named levels or a custom numeric value, all persisted to settings.
 
 #### Scenario: Low sensitivity requires loud speech
 - **WHEN** VAD sensitivity is `"low"`
@@ -51,6 +51,14 @@ The VAD RMS energy threshold SHALL be adjustable via four named levels persisted
 - **WHEN** VAD sensitivity is `"very_high"`
 - **THEN** very low-energy audio (RMS ≥ 20) SHALL trigger transmission
 
+#### Scenario: Custom sensitivity uses saved numeric threshold
+- **WHEN** VAD sensitivity is `"custom"`
+- **THEN** the RMS threshold SHALL be read from `vad_custom_threshold` in settings (default 50.0)
+
 #### Scenario: Default sensitivity is high
 - **WHEN** no `vad_sensitivity` key exists in settings
 - **THEN** the client SHALL behave as if sensitivity is `"high"`
+
+#### Scenario: Default custom threshold is 50.0
+- **WHEN** `vad_sensitivity` is `"custom"` and no `vad_custom_threshold` key exists in settings
+- **THEN** the client SHALL use a threshold of 50.0

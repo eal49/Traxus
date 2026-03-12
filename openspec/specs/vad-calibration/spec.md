@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: VAD calibration screen displays live audio energy
 The `VadCalibrationScreen` modal SHALL open the microphone and render a continuously updated ASCII bar chart of incoming RMS energy so the user can see their voice level in real time.
 
