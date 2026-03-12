@@ -50,3 +50,29 @@ The sounddevice callback thread SHALL communicate with the asyncio event loop vi
 #### Scenario: Callback enqueues safely
 - **WHEN** a PCM block arrives in the sounddevice callback thread during PTT
 - **THEN** it is posted to the asyncio queue via `call_soon_threadsafe` without raising a RuntimeError
+
+---
+
+### Requirement: AudioEngine supports VAD callback
+The AudioEngine SHALL accept a VAD callback that is fired (via call_soon_threadsafe) on voice/silence state transitions when VAD mode is active.
+
+#### Scenario: Callback fires on voice onset
+- **WHEN** a VAD callback is registered and microphone energy crosses the threshold from below to above
+- **THEN** the callback SHALL be invoked with `True` on the asyncio event loop
+
+#### Scenario: Callback fires on silence onset
+- **WHEN** a VAD callback is registered and microphone energy crosses the threshold from above to below
+- **THEN** the callback SHALL be invoked with `False` on the asyncio event loop
+
+#### Scenario: Callback not invoked when state unchanged
+- **WHEN** a VAD callback is registered and microphone energy stays above (or stays below) the threshold
+- **THEN** the callback SHALL NOT be invoked
+
+---
+
+### Requirement: AudioEngine start() is idempotent
+Calling `AudioEngine.start()` when the stream is already open SHALL be a no-op.
+
+#### Scenario: Double start does not crash
+- **WHEN** `AudioEngine.start()` is called while the stream is already open
+- **THEN** no exception is raised and the existing stream remains open

@@ -99,6 +99,9 @@ class ChatScreen(Screen):
     def update_ptt(self, active: bool) -> None:
         self.query_one("#status-bar", StatusBar).update_ptt(active)
 
+    def update_vad_listening(self, active: bool) -> None:
+        self.query_one("#status-bar", StatusBar).update_vad_listening(active)
+
     def update_members(self, members: list[dict]) -> None:
         try:
             self.query_one("#members", MemberPanel).set_members(members)

@@ -1,0 +1,56 @@
+### Requirement: VAD mode activates transmission on voice detection
+When PTT mode is set to VAD, the client SHALL automatically start transmitting when microphone energy exceeds the configured threshold, and stop transmitting after 400ms of silence.
+
+#### Scenario: Voice onset starts transmission
+- **WHEN** PTT mode is `"vad"` and the user is in a voice channel and microphone energy exceeds the threshold
+- **THEN** the client SHALL start transmitting immediately (equivalent to `start_ptt()`)
+
+#### Scenario: Silence after hangover stops transmission
+- **WHEN** PTT mode is `"vad"` and the user is transmitting and microphone energy has been below the threshold for 400ms
+- **THEN** the client SHALL stop transmitting (equivalent to `stop_ptt()`)
+
+#### Scenario: Brief silence within hangover does not stop transmission
+- **WHEN** PTT mode is `"vad"` and the user is transmitting and microphone energy drops below threshold but voice resumes within 400ms
+- **THEN** the client SHALL remain transmitting without interruption
+
+#### Scenario: VAD requires voice channel
+- **WHEN** PTT mode is `"vad"` and the user is not in a voice channel
+- **THEN** VAD monitoring SHALL not start transmission and SHALL display a hint to join a voice channel
+
+### Requirement: VAD mic stream stays open while in voice channel
+In VAD mode, the microphone input stream SHALL remain open continuously while the user is in a voice channel, regardless of whether transmission is active.
+
+#### Scenario: Mic opens on voice channel join in VAD mode
+- **WHEN** PTT mode is `"vad"` and the user joins a voice channel
+- **THEN** the microphone input stream SHALL open and VAD monitoring SHALL begin
+
+#### Scenario: Mic closes on voice channel leave in VAD mode
+- **WHEN** PTT mode is `"vad"` and the user leaves the voice channel
+- **THEN** the microphone input stream SHALL close and VAD monitoring SHALL stop
+
+#### Scenario: Mic stream not opened by PTT key in VAD mode
+- **WHEN** PTT mode is `"vad"` and the user presses the PTT key
+- **THEN** no additional stream SHALL be opened (stream already open from vjoin)
+
+### Requirement: VAD sensitivity is user-configurable
+The VAD RMS energy threshold SHALL be adjustable via four named levels persisted to settings.
+
+#### Scenario: Low sensitivity requires loud speech
+- **WHEN** VAD sensitivity is `"low"`
+- **THEN** only high-energy audio (RMS ≥ 200 on int16 scale) SHALL trigger transmission
+
+#### Scenario: Medium sensitivity is balanced
+- **WHEN** VAD sensitivity is `"medium"`
+- **THEN** moderate-energy audio (RMS ≥ 100) SHALL trigger transmission
+
+#### Scenario: High sensitivity (default) detects quiet speech
+- **WHEN** VAD sensitivity is `"high"`
+- **THEN** low-energy audio (RMS ≥ 50) SHALL trigger transmission
+
+#### Scenario: Very high sensitivity detects whispers
+- **WHEN** VAD sensitivity is `"very_high"`
+- **THEN** very low-energy audio (RMS ≥ 20) SHALL trigger transmission
+
+#### Scenario: Default sensitivity is high
+- **WHEN** no `vad_sensitivity` key exists in settings
+- **THEN** the client SHALL behave as if sensitivity is `"high"`

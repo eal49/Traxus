@@ -29,6 +29,7 @@ class StatusBar(Static):
         self._latency = 0
         self._nick = ""
         self._ptt_active = False
+        self._vad_listening = False
 
     def _build_markup(self) -> str:
         color = _STATE_COLORS.get(self._state, "#dcddde")
@@ -39,6 +40,8 @@ class StatusBar(Static):
             markup += f"   [bold]{self._nick}[/bold]"
         if self._ptt_active:
             markup += r"   [bold white]🎤 PTT ON[/bold white]"
+        elif self._vad_listening:
+            markup += r"   [bold yellow]🎤 LISTENING[/bold yellow]"
         return markup
 
     def _refresh_content(self) -> None:
@@ -61,4 +64,8 @@ class StatusBar(Static):
     def update_ptt(self, active: bool) -> None:
         self._ptt_active = active
         self.set_class(active, "ptt-active")
+        self._refresh_content()
+
+    def update_vad_listening(self, active: bool) -> None:
+        self._vad_listening = active
         self._refresh_content()

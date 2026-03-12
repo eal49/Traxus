@@ -93,6 +93,8 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
                 # ── 3. Join voice channel ─────────────────────────────────────
                 app._audio_engine.start = app_start_mock
                 app._audio_engine.capture_loop = _noop_capture
+                # Ensure toggle mode regardless of system settings file.
+                app._ptt_mode = "toggle"
 
                 app.handle_input("/vjoin lounge")
 

@@ -31,6 +31,14 @@ if TYPE_CHECKING:
 
 PTT_HOLD_DEBOUNCE_MS = 300
 PTT_HOLD_INITIAL_DEBOUNCE_MS = 800  # > Windows initial key-repeat delay (~500 ms)
+VAD_HANGOVER_MS = 400
+
+_VAD_SENSITIVITY_THRESHOLDS: dict[str, float] = {
+    "low":       600.0,
+    "medium":    400.0,
+    "high":      250.0,
+    "very_high": 100.0,
+}
 
 
 class TraxusApp(App):
@@ -73,12 +81,15 @@ class TraxusApp(App):
         self._audio_engine: AudioEngine = AudioEngine()
         self._capture_worker = None
         self._ptt_debounce_task: asyncio.Task | None = None
+        self._vad_hangover_task: asyncio.Task | None = None
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
         from client.settings import load_settings
         settings = load_settings()
         self._ptt_key: str = settings.get("ptt_key", "f9")
         self._ptt_mode: str = settings.get("ptt_mode", "toggle")
+        self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
+        self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
@@ -192,7 +203,15 @@ class TraxusApp(App):
                 def _on_settings_result(new_key: str | None) -> None:
                     if new_key is not None:
                         self._ptt_key = new_key
-                        save_settings({"ptt_key": self._ptt_key, "ptt_mode": self._ptt_mode})
+                        save_settings({
+                            "ptt_key": self._ptt_key,
+                            "ptt_mode": self._ptt_mode,
+                            "vad_sensitivity": self._vad_sensitivity,
+                            "vad_custom_threshold": self._vad_custom_threshold,
+                        })
+                    # Re-sync VAD state: if we should be listening but aren't,
+                    # restart; if we shouldn't be but are, stop.
+                    self._sync_vad_state()
 
                 self.push_screen(SettingsScreen(), _on_settings_result)
 
@@ -278,7 +297,9 @@ class TraxusApp(App):
             return
         self._cancel_ptt_debounce()
         self._audio_engine.transmitting = False
-        self._audio_engine.stop()
+        # In VAD mode the stream stays open (managed by _exit_vad_listening).
+        if self._ptt_mode != "vad":
+            self._audio_engine.stop()
         if self._capture_worker is not None:
             self._capture_worker.cancel()
             self._capture_worker = None
@@ -302,6 +323,70 @@ class TraxusApp(App):
             self.stop_ptt()
         except asyncio.CancelledError:
             pass
+
+    def _arm_vad_hangover(self) -> None:
+        self._cancel_vad_hangover()
+        loop = asyncio.get_running_loop()
+        self._vad_hangover_task = loop.create_task(self._vad_hangover_coro())
+
+    def _cancel_vad_hangover(self) -> None:
+        if self._vad_hangover_task is not None and not self._vad_hangover_task.done():
+            self._vad_hangover_task.cancel()
+        self._vad_hangover_task = None
+
+    async def _vad_hangover_coro(self) -> None:
+        try:
+            await asyncio.sleep(VAD_HANGOVER_MS / 1000)
+            self.stop_ptt()
+        except asyncio.CancelledError:
+            pass
+
+    def _on_vad_state(self, is_voice: bool) -> None:
+        """Called from the asyncio loop when VAD detects a voice/silence transition."""
+        if is_voice:
+            self._cancel_vad_hangover()
+            if not self._audio_engine.transmitting:
+                self.start_ptt()
+        else:
+            self._arm_vad_hangover()
+
+    def _get_vad_threshold(self) -> float:
+        """Resolve the current VAD threshold to a float."""
+        if self._vad_sensitivity == "custom":
+            return self._vad_custom_threshold
+        return _VAD_SENSITIVITY_THRESHOLDS.get(self._vad_sensitivity, 200.0)
+
+    def _enter_vad_listening(self) -> None:
+        """Open the mic stream for VAD and update the UI to show LISTENING."""
+        if not AUDIO_AVAILABLE:
+            return
+        threshold = self._get_vad_threshold()
+        loop = asyncio.get_running_loop()
+        self._audio_engine.start_vad(loop, threshold, self._on_vad_state)
+        chat = self._chat()
+        if chat:
+            chat.update_vad_listening(True)
+
+    def _exit_vad_listening(self) -> None:
+        """Close the VAD mic stream and clear the LISTENING indicator."""
+        self._cancel_vad_hangover()
+        self._audio_engine.stop_vad()
+        chat = self._chat()
+        if chat:
+            chat.update_vad_listening(False)
+
+    def _sync_vad_state(self) -> None:
+        """Ensure VAD is active iff ptt_mode=='vad' and in a voice channel."""
+        should_listen = (
+            AUDIO_AVAILABLE
+            and self._ptt_mode == "vad"
+            and bool(self.current_voice_channel)
+        )
+        is_listening = self._audio_engine._vad_active
+        if should_listen and not is_listening:
+            self._enter_vad_listening()
+        elif not should_listen and is_listening:
+            self._exit_vad_listening()
 
     async def _send_voice_frame(self, channel: str, pcm_bytes: bytes) -> None:
         if self._ws_worker:
@@ -397,11 +482,18 @@ class TraxusApp(App):
             case "voice_state":
                 channel = payload.get("channel", "")
                 users = payload.get("users", [])
+                prev_channel = self.current_voice_channel
                 self.current_voice_channel = channel if users else ""
                 self._voice_users = users
                 if chat:
                     chat.update_voice_state(users)
                     chat.update_member_voice(users)
+                # VAD mic lifecycle: enter listening when joining, exit when leaving.
+                if self._ptt_mode == "vad":
+                    if self.current_voice_channel and not prev_channel:
+                        self._enter_vad_listening()
+                    elif not self.current_voice_channel and prev_channel:
+                        self._exit_vad_listening()
 
             case "user_list":
                 channel = payload.get("channel", "")
@@ -451,12 +543,15 @@ class TraxusApp(App):
             chat.append_system(text)
 
     def _chat(self) -> "ChatScreen | None":
+        """Return the ChatScreen even when a modal is on top of it."""
         from client.screens.chat_screen import ChatScreen
         try:
-            screen = self.screen
+            for screen in reversed(self.screen_stack):
+                if isinstance(screen, ChatScreen):
+                    return screen
         except Exception:
-            return None
-        return screen if isinstance(screen, ChatScreen) else None
+            pass
+        return None
 
     def _update_members_from_system(self, content: str, chat: "ChatScreen | None") -> None:
         import re
