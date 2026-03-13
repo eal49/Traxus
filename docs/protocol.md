@@ -10,20 +10,30 @@ This document specifies every message type exchanged between Traxus clients and 
 |---|---|
 | Transport | WebSocket over TCP |
 | Text encoding | UTF-8 |
-| Frame types | **Text** frames (JSON messages) and **Binary** frames (raw PCM audio) |
+| Frame types | **Text** frames (JSON messages) and **Binary** frames (audio) |
 | Text framing | One JSON object per text frame |
 | Required field | Every JSON message **must** include a `"type"` string field |
-| Server version | `0.1.0` (echoed in `auth_ok`) |
+| Server version | `0.2.0` (echoed in `auth_ok`; clients with a different version are rejected) |
 
 ### Binary Audio Frames
 
 Audio data is transmitted as WebSocket **binary frames** on the same connection as JSON text frames. The `websockets` library yields `str` for text frames and `bytes` for binary frames from the same iterator.
 
+Each frame contains a **1-byte codec tag** immediately before the audio payload. The server relays binary frames transparently — it never inspects past the channel/username headers.
+
+**Codec tag values:**
+
+| Value | Constant | Meaning |
+|-------|----------|---------|
+| `0x00` | `CODEC_RAW` | Raw int16 LE PCM (fallback when numpy unavailable) |
+| `0x01` | `CODEC_ADPCM` | IMA ADPCM compressed (~4× reduction, 256 kbps → ~64 kbps) |
+
 **C2S binary frame (client → server):**
 ```
 [1 byte : channel name length N]
 [N bytes: channel name (UTF-8)]
-[remaining: int16 LE PCM samples at 16 000 Hz, mono]
+[1 byte : codec tag (0x00 = raw PCM, 0x01 = IMA ADPCM)]
+[remaining: audio payload]
 ```
 
 **S2C binary frame (server → client):**
@@ -32,7 +42,15 @@ Audio data is transmitted as WebSocket **binary frames** on the same connection 
 [N bytes: channel name (UTF-8)]
 [1 byte : username length M]
 [M bytes: username (UTF-8)]
-[remaining: int16 LE PCM samples]
+[1 byte : codec tag (0x00 = raw PCM, 0x01 = IMA ADPCM)]
+[remaining: audio payload]
+```
+
+**IMA ADPCM payload format** (when codec tag = `0x01`):
+```
+[2 bytes: initial predictor (int16 LE)]
+[2 bytes: initial step index (int16 LE, clamped to 0–88)]
+[remaining: nibble-packed ADPCM samples, two 4-bit nibbles per byte, LSB first]
 ```
 
 Audio parameters: `samplerate=16000`, `channels=1`, `dtype=int16`, `blocksize=320` samples (20 ms frames).

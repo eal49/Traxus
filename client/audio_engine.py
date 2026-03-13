@@ -31,6 +31,16 @@ except ImportError:
     np = None   # type: ignore[assignment]
     sd = None   # type: ignore[assignment]
 
+if AUDIO_AVAILABLE:
+    from shared.adpcm import CODEC_ADPCM, CODEC_RAW, decode as _adpcm_decode, encode as _adpcm_encode
+    ADPCM_AVAILABLE = True
+else:
+    CODEC_RAW    = 0  # type: ignore[assignment]
+    CODEC_ADPCM  = 1  # type: ignore[assignment]
+    ADPCM_AVAILABLE = False
+    _adpcm_encode = None  # type: ignore[assignment]
+    _adpcm_decode = None  # type: ignore[assignment]
+
 _SAMPLERATE = 16_000
 _CHANNELS   = 1
 _DTYPE      = "int16"
@@ -44,7 +54,7 @@ class AudioEngine:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream = None
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue()   # capture frames
+        self._queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()   # (codec, audio) capture frames
         self._transmitting: bool = False
 
         # VAD state
@@ -55,7 +65,8 @@ class AudioEngine:
         self._energy_callback = None       # callable(rms: float) | None
 
         # Playback: a thread-safe queue drained by a background thread.
-        self._play_queue: queue.Queue[bytes | None] = queue.Queue(
+        # Items are (codec, audio_bytes) tuples; None is the shutdown sentinel.
+        self._play_queue: queue.Queue[tuple[int, bytes] | None] = queue.Queue(
             maxsize=_PLAY_QUEUE_MAX
         )
         self._play_thread: threading.Thread | None = None
@@ -157,27 +168,37 @@ class AudioEngine:
             if self._energy_callback is not None:
                 self._loop.call_soon_threadsafe(self._energy_callback, rms)
         if self._transmitting and self._loop is not None:
+            if ADPCM_AVAILABLE:
+                audio_bytes = _adpcm_encode(indata.tobytes())
+                codec = CODEC_ADPCM
+            else:
+                audio_bytes = indata.tobytes()
+                codec = CODEC_RAW
             self._loop.call_soon_threadsafe(
-                self._queue.put_nowait, indata.tobytes()
+                self._queue.put_nowait, (codec, audio_bytes)
             )
 
     async def capture_loop(self, channel: str, send_fn) -> None:
-        """Drain the PCM queue and send each frame via send_fn."""
+        """Drain the capture queue and send each frame via send_fn."""
         while self._transmitting:
             try:
-                pcm_bytes = await asyncio.wait_for(self._queue.get(), timeout=0.1)
+                codec, audio_bytes = await asyncio.wait_for(self._queue.get(), timeout=0.1)
             except asyncio.TimeoutError:
                 continue
-            await send_fn(channel, pcm_bytes)
+            await send_fn(channel, audio_bytes, codec)
 
     # ── Playback ──────────────────────────────────────────────────────────────
 
-    def play(self, pcm_bytes: bytes) -> None:
-        """Queue PCM bytes for playback.  Returns instantly — never blocks."""
+    def play(self, audio_bytes: bytes, codec: int = CODEC_RAW) -> None:
+        """Queue audio for playback.  Returns instantly — never blocks.
+
+        ADPCM decode happens in the background playback thread, not here,
+        so this method only does a queue.put_nowait() and returns in nanoseconds.
+        """
         if not AUDIO_AVAILABLE:
             return
         try:
-            self._play_queue.put_nowait(pcm_bytes)
+            self._play_queue.put_nowait((codec, audio_bytes))
         except queue.Full:
             # Playback thread is behind; drop the oldest frame and enqueue new.
             try:
@@ -185,7 +206,7 @@ class AudioEngine:
             except queue.Empty:
                 pass
             try:
-                self._play_queue.put_nowait(pcm_bytes)
+                self._play_queue.put_nowait((codec, audio_bytes))
             except queue.Full:
                 pass  # give up if still full
 
@@ -193,6 +214,7 @@ class AudioEngine:
         """
         Background thread: owns a single continuous OutputStream and writes
         PCM frames to it as they arrive.  One stream, no per-frame stop/start.
+        ADPCM decode happens here so play() never blocks the Textual pump.
         """
         try:
             with sd.OutputStream(
@@ -201,9 +223,14 @@ class AudioEngine:
                 dtype=_DTYPE,
             ) as out_stream:
                 while True:
-                    pcm_bytes = self._play_queue.get()
-                    if pcm_bytes is None:        # sentinel → shut down
+                    item = self._play_queue.get()
+                    if item is None:             # sentinel → shut down
                         break
+                    codec, audio_bytes = item
+                    if ADPCM_AVAILABLE and codec == CODEC_ADPCM:
+                        pcm_bytes = _adpcm_decode(audio_bytes)
+                    else:
+                        pcm_bytes = audio_bytes
                     audio = np.frombuffer(pcm_bytes, dtype=np.int16)
                     out_stream.write(audio)
         except Exception:

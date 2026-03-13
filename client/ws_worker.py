@@ -81,7 +81,7 @@ class WsWorker:
                     await ws.send(json.dumps({
                         "type": C2S.AUTH,
                         "username": username,
-                        "client_version": VERSION,
+                        "version": VERSION,
                     }))
 
                     self._post_state("connected")

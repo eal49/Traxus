@@ -3,7 +3,7 @@ Canonical message type constants and VERSION shared by server and client.
 """
 from __future__ import annotations
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 # ── Client → Server ──────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ class S2C:
 class AuthError:
     USERNAME_TAKEN   = "username_taken"
     INVALID_USERNAME = "invalid_username"
+    VERSION_MISMATCH = "version_mismatch"
 
 
 # ── Server error codes ────────────────────────────────────────────────────────

@@ -36,11 +36,15 @@ The audio engine SHALL capture microphone input at 16 000 Hz, mono (1 channel), 
 ---
 
 ### Requirement: Audio playback
-The client SHALL play received audio frames from the server using sounddevice. Each received binary frame is decoded using `shared/voice_protocol.unpack_s2c()` and the PCM bytes are played back non-blockingly.
+The client SHALL play received audio frames from the server using sounddevice. Each received binary frame is decoded using `shared/voice_protocol.unpack_s2c()`, the codec tag is read, the audio payload is decoded if necessary (ADPCM → PCM), and the resulting PCM bytes are played back non-blockingly.
 
-#### Scenario: Received frame is played
-- **WHEN** the client receives a binary frame while in the corresponding voice channel
-- **THEN** the PCM data is passed to `sounddevice.play()` with `samplerate=16000`
+#### Scenario: Received ADPCM frame is decoded and played
+- **WHEN** the client receives a binary frame with codec tag `0x01` (ADPCM) while in the corresponding voice channel
+- **THEN** the audio payload SHALL be decoded to PCM via `shared/adpcm.decode()` before being passed to playback
+
+#### Scenario: Received raw PCM frame is played directly
+- **WHEN** the client receives a binary frame with codec tag `0x00` (raw PCM)
+- **THEN** the audio payload SHALL be passed to playback without transformation
 
 ---
 
@@ -76,3 +80,16 @@ Calling `AudioEngine.start()` when the stream is already open SHALL be a no-op.
 #### Scenario: Double start does not crash
 - **WHEN** `AudioEngine.start()` is called while the stream is already open
 - **THEN** no exception is raised and the existing stream remains open
+
+---
+
+### Requirement: AudioEngine encodes captured audio to ADPCM
+When ADPCM is available (numpy importable), the AudioEngine SHALL encode captured PCM frames to ADPCM before queuing them for transmission.
+
+#### Scenario: Captured frame is compressed before queuing
+- **WHEN** PTT is active and a PCM block arrives in the sounddevice callback
+- **THEN** the block SHALL be encoded via `shared/adpcm.encode()` before being placed on the capture queue
+
+#### Scenario: Fallback to raw PCM when numpy unavailable
+- **WHEN** numpy is not importable at startup
+- **THEN** the AudioEngine SHALL queue raw PCM bytes and set codec tag to `0x00`

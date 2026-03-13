@@ -92,6 +92,15 @@ class MessageRouter:
     # ── Handlers ─────────────────────────────────────────────────────────────
 
     async def _handle_auth(self, payload, ws, client):
+        client_version = str(payload.get("version", ""))
+        if client_version != VERSION:
+            await self._send(ws, {
+                "type": S2C.AUTH_ERROR, "reason": AuthError.VERSION_MISMATCH,
+                "server_version": VERSION, "client_version": client_version,
+            })
+            await ws.close()
+            return client
+
         username = str(payload.get("username", "")).strip()
 
         if not username or len(username) > 32 or " " in username:

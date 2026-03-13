@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.connection_manager import ConnectionManager
 from server.channel_registry import ChannelRegistry
 from server.message_router import MessageRouter
-from shared.message_types import C2S, S2C, AuthError, ErrorCode
+from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
 
 
 # ── WebSocket stub ────────────────────────────────────────────────────────────
@@ -25,9 +25,13 @@ class MockWs:
 
     def __init__(self):
         self.sent: list[dict] = []
+        self.closed: bool = False
 
     async def send(self, raw: str) -> None:
         self.sent.append(json.loads(raw))
+
+    async def close(self) -> None:
+        self.closed = True
 
     # Convenience helpers
     def of_type(self, t: str) -> list[dict]:
@@ -56,7 +60,7 @@ def make_router():
 async def do_auth(router, conn, ws, username="alice"):
     """Perform a successful auth and return the resulting client."""
     return await router.dispatch(
-        json.dumps({"type": C2S.AUTH, "username": username}),
+        json.dumps({"type": C2S.AUTH, "username": username, "version": VERSION}),
         ws, None
     )
 
@@ -119,19 +123,19 @@ class TestAuth(unittest.IsolatedAsyncioTestCase):
 
     async def test_auth_error_empty_username(self):
         client = await router_dispatch(self.router, self.ws, None,
-                                       {"type": C2S.AUTH, "username": ""})
+                                       {"type": C2S.AUTH, "username": "", "version": VERSION})
         self.assertIsNone(client)
         self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_ERROR))
 
     async def test_auth_error_username_with_space(self):
         client = await router_dispatch(self.router, self.ws, None,
-                                       {"type": C2S.AUTH, "username": "has space"})
+                                       {"type": C2S.AUTH, "username": "has space", "version": VERSION})
         self.assertIsNone(client)
         self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_ERROR))
 
     async def test_auth_error_username_too_long(self):
         client = await router_dispatch(self.router, self.ws, None,
-                                       {"type": C2S.AUTH, "username": "a" * 33})
+                                       {"type": C2S.AUTH, "username": "a" * 33, "version": VERSION})
         self.assertIsNone(client)
         self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_ERROR))
 

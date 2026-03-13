@@ -52,7 +52,7 @@ def _make_s2c_frame(channel: str, username: str, pcm: bytes) -> bytes:
 async def _raw_client(username: str) -> websockets.asyncio.client.ClientConnection:
     """Return an authenticated raw WS connection."""
     ws = await websockets.asyncio.client.connect("ws://localhost:8765")
-    await ws.send(json.dumps({"type": "auth", "username": username, "client_version": VERSION}))
+    await ws.send(json.dumps({"type": "auth", "username": username, "version": VERSION}))
     resp = json.loads(await ws.recv())
     assert resp["type"] == "auth_ok", f"auth failed: {resp}"
     return ws
@@ -152,9 +152,9 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
                 # Instrument play() to verify it returns instantly.
                 real_play = app._audio_engine.play
 
-                def timed_play(pcm_bytes: bytes) -> None:
+                def timed_play(audio_bytes: bytes, codec: int = 0) -> None:
                     t0 = time.monotonic()
-                    real_play(pcm_bytes)
+                    real_play(audio_bytes, codec)
                     play_durations.append((time.monotonic() - t0) * 1000)
 
                 app._audio_engine.play = timed_play  # type: ignore[method-assign]

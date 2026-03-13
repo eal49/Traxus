@@ -36,11 +36,11 @@ The `docs/protocol.md` file SHALL specify the transport layer, encoding, and mes
 ---
 
 ### Requirement: Binary frame transport documented
-`docs/protocol.md` Transport & Encoding section SHALL note that binary frames are used for audio data alongside text JSON frames.
+`docs/protocol.md` Transport & Encoding section SHALL note that binary frames are used for audio data alongside text JSON frames, and SHALL document the codec tag byte in the frame layout.
 
-#### Scenario: Transport section covers binary frames
-- **WHEN** a developer reads the Transport & Encoding table in docs/protocol.md
-- **THEN** they find a row stating binary frames carry raw PCM audio and the frame format (length-prefixed channel + optional username header + int16 LE samples)
+#### Scenario: Transport section covers binary frames with codec tag
+- **WHEN** a developer reads the Transport & Encoding section in docs/protocol.md
+- **THEN** they SHALL find a description stating binary frames carry a 1-byte codec tag (`0x00` = raw PCM, `0x01` = IMA ADPCM) followed by the audio payload, after the channel/username header bytes
 
 ---
 
