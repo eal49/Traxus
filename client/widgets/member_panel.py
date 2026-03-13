@@ -17,10 +17,12 @@ class MemberPanel(Static):
         lines = [r"[bold dim]  Members[/bold dim]"]
         for m in self._members:
             name = m.get("username", "?")
-            if name in self._voice_users:
-                lines.append(f"  🎤 {name}")
-            else:
-                lines.append(f"  {name}")
+            lines.append(f"  {name}")
+        if self._voice_users:
+            lines.append("")
+            lines.append(r"[bold dim]  In Voice[/bold dim]")
+            for name in sorted(self._voice_users):
+                lines.append(f"  🔊 {name}")
         return "\n".join(lines)
 
     def set_members(self, members: list[dict]) -> None:

@@ -203,12 +203,15 @@ class TraxusApp(App):
                 def _on_settings_result(new_key: str | None) -> None:
                     if new_key is not None:
                         self._ptt_key = new_key
-                        save_settings({
+                        from client.settings import load_settings as _ls
+                        settings = _ls()
+                        settings.update({
                             "ptt_key": self._ptt_key,
                             "ptt_mode": self._ptt_mode,
                             "vad_sensitivity": self._vad_sensitivity,
                             "vad_custom_threshold": self._vad_custom_threshold,
                         })
+                        save_settings(settings)
                     # Re-sync VAD state: if we should be listening but aren't,
                     # restart; if we shouldn't be but are, stop.
                     self._sync_vad_state()
@@ -388,17 +391,17 @@ class TraxusApp(App):
         elif not should_listen and is_listening:
             self._exit_vad_listening()
 
-    async def _send_voice_frame(self, channel: str, pcm_bytes: bytes) -> None:
+    async def _send_voice_frame(self, channel: str, audio_bytes: bytes, codec: int = 0) -> None:
         if self._ws_worker:
             from shared import voice_protocol as vp
-            self._ws_worker.enqueue_binary(vp.pack_c2s(channel, pcm_bytes))
+            self._ws_worker.enqueue_binary(vp.pack_c2s(channel, audio_bytes, codec))
 
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
 
     def on_traxus_app_audio_frame(self, msg: "TraxusApp.AudioFrame") -> None:
         try:
-            _channel, _username, pcm_bytes = voice_protocol.unpack_s2c(msg.data)
-            self._audio_engine.play(pcm_bytes)   # instant: queues to playback thread
+            _channel, _username, codec, audio_bytes = voice_protocol.unpack_s2c(msg.data)
+            self._audio_engine.play(audio_bytes, codec)   # instant: queues to playback thread
         except Exception:
             pass
 
@@ -420,6 +423,7 @@ class TraxusApp(App):
                 reason_text = {
                     "username_taken":   "That username is already taken.",
                     "invalid_username": "Invalid username. Use 1–32 non-space chars.",
+                    "version_mismatch": f"Client version mismatch. Server requires v{payload.get('server_version', '?')}. Please update your client.",
                 }.get(reason, f"Auth failed: {reason}")
                 login.show_error(reason_text)
 
@@ -530,6 +534,11 @@ class TraxusApp(App):
                 chat.append_system("Connection lost — reconnecting…")
             elif msg.state == "connected":
                 chat.append_system("Reconnected.")
+
+    def watch_current_voice_channel(self, name: str) -> None:
+        chat = self._chat()
+        if chat:
+            chat.update_voice_channel(name)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

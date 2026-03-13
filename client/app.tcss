@@ -213,7 +213,7 @@ InputBar Input:focus {
 
 StatusBar {
     dock: bottom;
-    height: 1;
+    height: 2;
     background: $surface-darken-1;
     color: $text-muted;
     padding: 0 1;

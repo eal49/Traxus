@@ -41,8 +41,8 @@ class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
             self.assertIn("alice", markup)
             self.assertIn("bob", markup)
 
-    async def test_update_voice_adds_mic_prefix(self):
-        """update_voice() must prefix voice members with mic emoji."""
+    async def test_update_voice_adds_speaker_prefix(self):
+        """update_voice() must show voice members in the In Voice section."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
@@ -57,14 +57,14 @@ class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             markup = mp._build_markup()
-            # alice should have mic prefix
-            self.assertIn("🎤 alice", markup)
-            # bob should NOT have mic prefix
-            self.assertNotIn("🎤 bob", markup)
+            # alice should appear in In Voice section with speaker prefix
+            self.assertIn("🔊 alice", markup)
+            # bob should NOT appear in the In Voice section
+            self.assertNotIn("🔊 bob", markup)
             self.assertIn("bob", markup)
 
     async def test_update_voice_clears_when_empty(self):
-        """Clearing voice users removes all mic prefixes."""
+        """Clearing voice users removes the In Voice section."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
@@ -77,7 +77,8 @@ class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             markup = mp._build_markup()
-            self.assertNotIn("🎤", markup)
+            self.assertNotIn("🔊", markup)
+            self.assertNotIn("In Voice", markup)
             self.assertIn("alice", markup)
 
 

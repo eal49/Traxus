@@ -176,8 +176,10 @@ class TestServerMessageRouting(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             sidebar = app.screen.query_one("#sidebar", ChannelSidebar)
-            items = list(sidebar.query_one("#channel-list").query("ListItem"))
-            self.assertEqual(len(items), 2)
+            all_items = list(sidebar.query_one("#channel-list").query("ListItem"))
+            # Section header items have no name; count only real channel items
+            channel_items = [i for i in all_items if i.name]
+            self.assertEqual(len(channel_items), 2)
 
     async def test_nick_changed_updates_own_username(self):
         app = TraxusApp()
@@ -362,24 +364,25 @@ class TestAudioFrameDispatch(unittest.IsolatedAsyncioTestCase):
             await app.switch_screen(ChatScreen())
             await pilot.pause()
 
-            played_chunks: list[bytes] = []
+            played_chunks: list[tuple] = []
 
-            def fake_play(pcm_bytes: bytes) -> None:
-                played_chunks.append(pcm_bytes)
+            def fake_play(audio_bytes: bytes, codec: int = 0) -> None:
+                played_chunks.append((audio_bytes, codec))
 
             app._audio_engine.play = fake_play  # type: ignore[method-assign]
 
-            # Build a valid S2C frame
-            pcm = b"\x01\x02\x03\x04"
+            # Build a valid S2C frame (with codec byte = CODEC_RAW = 0)
+            audio = b"\x01\x02\x03\x04"
             ch = b"lounge"
             un = b"alice"
-            frame = bytes([len(ch)]) + ch + bytes([len(un)]) + un + pcm
+            frame = bytes([len(ch)]) + ch + bytes([len(un)]) + un + bytes([0]) + audio
 
             app.post_message(TraxusApp.AudioFrame(frame))
             await pilot.pause()
 
             self.assertEqual(len(played_chunks), 1)
-            self.assertEqual(played_chunks[0], pcm)
+            self.assertEqual(played_chunks[0][0], audio)
+            self.assertEqual(played_chunks[0][1], 0)
 
     async def test_malformed_audio_frame_does_not_crash(self):
         app = TraxusApp()

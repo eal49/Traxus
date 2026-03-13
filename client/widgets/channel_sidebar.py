@@ -26,16 +26,27 @@ class ChannelSidebar(Widget):
     def refresh_channels(self, channels: list[dict]) -> None:
         lv = self.query_one("#channel-list", ListView)
         lv.clear()
-        for ch in channels:
-            count = ch.get("member_count", 0)
+        text_channels = [ch for ch in channels if ch.get("type", "text") == "text"]
+        voice_channels = [ch for ch in channels if ch.get("type", "text") == "voice"]
+
+        if text_channels:
+            header = ListItem(Label("  [dim bold]TEXT[/dim bold]", markup=True))
+            header.can_focus = False
+            lv.append(header)
+        for ch in text_channels:
             name = ch["name"]
-            ch_type = ch.get("type", "text")
-            prefix = "♪" if ch_type == "voice" else "#"
-            label_text = f"  {prefix} {name}"
-            if count:
-                label_text += f"  [dim]{count}[/dim]"
-            item = ListItem(Label(label_text, markup=True), name=name)
+            item = ListItem(Label(f"  # {name}", markup=True), name=name)
             lv.append(item)
+
+        if voice_channels:
+            header = ListItem(Label("  [dim bold]VOICE[/dim bold]", markup=True))
+            header.can_focus = False
+            lv.append(header)
+        for ch in voice_channels:
+            name = ch["name"]
+            item = ListItem(Label(f"  ♪ {name}", markup=True), name=name)
+            lv.append(item)
+
         # Re-apply active highlight after refresh
         if self.active_channel:
             self._highlight(self.active_channel)

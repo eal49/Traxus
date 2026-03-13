@@ -20,6 +20,8 @@ _DEFAULTS: dict = {
     "ptt_mode": "toggle",
     "vad_sensitivity": "high",
     "vad_custom_threshold": 50.0,
+    "last_server": "",
+    "last_username": "",
 }
 
 

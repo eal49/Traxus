@@ -30,6 +30,7 @@ class StatusBar(Static):
         self._nick = ""
         self._ptt_active = False
         self._vad_listening = False
+        self._voice_channel = ""
 
     def _build_markup(self) -> str:
         color = _STATE_COLORS.get(self._state, "#dcddde")
@@ -38,6 +39,8 @@ class StatusBar(Static):
         markup = f"[{color}]{icon} {self._state.upper()}[/{color}]{lat}"
         if self._nick:
             markup += f"   [bold]{self._nick}[/bold]"
+        if self._voice_channel:
+            markup += f"   [bold #57f287]🔊 {self._voice_channel}[/bold #57f287]"
         if self._ptt_active:
             markup += r"   [bold white]🎤 PTT ON[/bold white]"
         elif self._vad_listening:
@@ -68,4 +71,8 @@ class StatusBar(Static):
 
     def update_vad_listening(self, active: bool) -> None:
         self._vad_listening = active
+        self._refresh_content()
+
+    def update_voice_channel(self, name: str) -> None:
+        self._voice_channel = name
         self._refresh_content()

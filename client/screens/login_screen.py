@@ -4,6 +4,8 @@ from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, Static
 
+from client.settings import load_settings, save_settings
+
 LOGO = """\
   ████████╗██████╗  █████╗ ██╗  ██╗██╗   ██╗███████╗
      ██╔══╝██╔══██╗██╔══██╗╚██╗██╔╝██║   ██║██╔════╝
@@ -35,7 +37,17 @@ class LoginScreen(Screen):
         yield Label("", id="error-label")
 
     def on_mount(self) -> None:
-        self.query_one("#server-input", Input).focus()
+        settings = load_settings()
+        last_server = settings.get("last_server", "")
+        last_username = settings.get("last_username", "")
+        if last_server:
+            self.query_one("#server-input", Input).value = last_server
+        if last_username:
+            self.query_one("#nick-input", Input).value = last_username
+        if last_server and last_username:
+            self.query_one("#nick-input", Input).focus()
+        else:
+            self.query_one("#server-input", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "connect-btn":
@@ -65,8 +77,16 @@ class LoginScreen(Screen):
             return
 
         self.show_error("")  # clear any previous error
-        # Delegate to app
+        # Delegate to app first — don't block the connection with I/O
         self.app.connect_to_server(server_url, username)  # type: ignore[attr-defined]
+        # Persist for next session (after connection is already scheduled)
+        try:
+            settings = load_settings()
+            settings["last_server"] = server_url
+            settings["last_username"] = username
+            save_settings(settings)
+        except Exception:
+            pass
 
     def show_error(self, msg: str) -> None:
         label = self.query_one("#error-label", Label)

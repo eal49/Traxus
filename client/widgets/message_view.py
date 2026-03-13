@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 
 from textual.widgets import RichLog
+
+_NICK_PALETTE = [
+    "#5865f2",  # blurple
+    "#57f287",  # green
+    "#fee75c",  # yellow
+    "#eb459e",  # pink
+    "#ed4245",  # red
+    "#00b0f4",  # cyan
+    "#f47fff",  # magenta
+    "#faa61a",  # orange
+]
+
+
+def nick_color(username: str) -> str:
+    idx = int(hashlib.md5(username.encode()).hexdigest(), 16) % len(_NICK_PALETTE)
+    return _NICK_PALETTE[idx]
 
 
 class MessageView(RichLog):
@@ -18,13 +35,17 @@ class MessageView(RichLog):
         self.markup = True
         self.highlight = False
 
-    def add_chat(self, payload: dict) -> None:
+    def add_chat(self, payload: dict, self_username: str = "") -> None:
         ts = _fmt_ts(payload.get("ts"))
-        nick = _escape(str(payload.get("username", "?")))
+        raw_nick = str(payload.get("username", "?"))
+        nick = _escape(raw_nick)
         content = _escape(str(payload.get("content", "")))
-        self.write(
-            f"[dim]{ts}[/dim]  [bold #57f287]{nick}[/bold #57f287]  {content}"
-        )
+        if self_username and raw_nick == self_username:
+            nick_markup = f"[bold white]{nick}[/bold white]"
+        else:
+            color = nick_color(raw_nick)
+            nick_markup = f"[bold {color}]{nick}[/bold {color}]"
+        self.write(f"[dim]{ts}[/dim]  {nick_markup}  {content}")
 
     def add_system(self, content: str) -> None:
         self.write(f"[dim italic #72767d]  {_escape(content)}[/dim italic #72767d]")

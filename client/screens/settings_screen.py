@@ -31,14 +31,17 @@ class SettingsScreen(ModalScreen[str | None]):
     BINDINGS = [("escape", "dismiss", "Close")]
 
     def _all_settings(self) -> dict:
-        """Build a complete settings dict from current app state."""
+        """Build a complete settings dict — merge app state onto disk to preserve all keys."""
+        from client.settings import load_settings
         app = self.app
-        return {
+        settings = load_settings()
+        settings.update({
             "ptt_key": getattr(app, "_ptt_key", "f9"),
             "ptt_mode": getattr(app, "_ptt_mode", "toggle"),
             "vad_sensitivity": getattr(app, "_vad_sensitivity", "high"),
             "vad_custom_threshold": getattr(app, "_vad_custom_threshold", 50.0),
-        }
+        })
+        return settings
 
     def _sens_label(self) -> str:
         sens = getattr(self.app, "_vad_sensitivity", "high")

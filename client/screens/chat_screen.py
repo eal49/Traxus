@@ -31,6 +31,12 @@ class ChatScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#input-area", InputBar).focus_input()
+        # Sync status bar with current app state — the "connected" message
+        # arrives before ChatScreen exists, so the StatusBar never saw it.
+        self.update_status(
+            self.app.connection_state,  # type: ignore[attr-defined]
+            nick=self.app.username,     # type: ignore[attr-defined]
+        )
         # Re-request channel list — the initial one from auth may have arrived
         # before this screen was mounted and would have been silently dropped.
         from shared.message_types import C2S
@@ -66,7 +72,7 @@ class ChatScreen(Screen):
     def append_chat(self, payload: dict) -> None:
         mv = self._mv()
         if mv:
-            mv.add_chat(payload)
+            mv.add_chat(payload, self_username=self.app.username)  # type: ignore[attr-defined]
 
     def append_system(self, content: str) -> None:
         mv = self._mv()
@@ -102,6 +108,12 @@ class ChatScreen(Screen):
     def update_vad_listening(self, active: bool) -> None:
         self.query_one("#status-bar", StatusBar).update_vad_listening(active)
 
+    def update_voice_channel(self, name: str) -> None:
+        try:
+            self.query_one("#status-bar", StatusBar).update_voice_channel(name)
+        except Exception:
+            pass
+
     def update_members(self, members: list[dict]) -> None:
         try:
             self.query_one("#members", MemberPanel).set_members(members)
@@ -127,5 +139,6 @@ class ChatScreen(Screen):
     def load_history(self, history: list[dict]) -> None:
         mv = self.query_one("#messages", MessageView)
         mv.clear()
+        username = self.app.username  # type: ignore[attr-defined]
         for msg in history:
-            mv.add_chat(msg)
+            mv.add_chat(msg, self_username=username)
