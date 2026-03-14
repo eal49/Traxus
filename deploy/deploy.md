@@ -62,6 +62,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r deploy/requirements-server.txt
 ```
 
+> **Note:** `numpy` is required for IMA ADPCM audio compression (`shared/adpcm.py`).
+> It is listed in `requirements-server.txt` and installed automatically by the command above.
+
 Verify the server starts:
 
 ```bash
