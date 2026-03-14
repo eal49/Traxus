@@ -106,6 +106,10 @@ class TraxusApp(App):
     # ── Called by ChatScreen widgets ──────────────────────────────────────────
 
     def join_channel(self, channel: str) -> None:
+        if channel == self.current_channel:
+            # Re-clicking the active channel: just refresh members, no join noise.
+            self._send({"type": C2S.LIST_MEMBERS, "channel": channel})
+            return
         self._send({
             "type": C2S.JOIN,
             "channel": channel,
@@ -438,8 +442,7 @@ class TraxusApp(App):
                     chat.set_active_channel(channel)
                     chat.load_history(payload.get("history", []))
                     chat.append_system(f"Joined #{channel}")
-                    members = self._channel_members.get(channel, [])
-                    chat.update_members(members)
+                    chat.update_members([])
 
             case "left":
                 channel = payload.get("channel", "")

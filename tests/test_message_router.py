@@ -481,6 +481,45 @@ class TestPingAndList(unittest.IsolatedAsyncioTestCase):
         self.assertIn("dev", names)
 
 
+# ── list_members tests ────────────────────────────────────────────────────────
+
+class TestListMembers(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+        self.client = await do_auth(self.router, self.conn, self.ws)
+        self.ws.clear()
+
+    async def test_list_members_returns_user_list_to_requester_only(self):
+        # Second client joins #general so there are two members to list.
+        ws2 = MockWs()
+        client2 = await do_auth(self.router, self.conn, ws2, username="bob")
+        ws2.clear()
+        self.ws.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.LIST_MEMBERS, "channel": "general"})
+
+        # Requester receives USER_LIST.
+        msg = self.ws.first_of_type(S2C.USER_LIST)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["channel"], "general")
+        usernames = {u["username"] for u in msg["users"]}
+        self.assertIn("alice", usernames)
+        self.assertIn("bob", usernames)
+
+        # Other client receives nothing as a result of this request.
+        self.assertEqual(ws2.of_type(S2C.USER_LIST), [])
+
+    async def test_list_members_unknown_channel_returns_error(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.LIST_MEMBERS, "channel": "no-such-channel"})
+        msg = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["code"], ErrorCode.NO_SUCH_CHANNEL)
+
+
 # ── Disconnect tests ──────────────────────────────────────────────────────────
 
 class TestDisconnect(unittest.IsolatedAsyncioTestCase):

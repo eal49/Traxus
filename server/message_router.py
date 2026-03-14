@@ -37,6 +37,7 @@ class MessageRouter:
             C2S.NICK:          self._handle_nick,
             C2S.CREATE:        self._handle_create,
             C2S.LIST_CHANNELS: self._handle_list_channels,
+            C2S.LIST_MEMBERS:  self._handle_list_members,
             C2S.PING:          self._handle_ping,
             C2S.VOICE_JOIN:    self._handle_voice_join,
             C2S.VOICE_LEAVE:   self._handle_voice_leave,
@@ -299,6 +300,25 @@ class MessageRouter:
 
     async def _handle_list_channels(self, payload, ws, client):
         await self._send(ws, self._channel_list_payload())
+        return client
+
+    async def _handle_list_members(self, payload, ws, client):
+        channel = str(payload.get("channel", "")).strip().lstrip("#")
+        if not self._chan.exists(channel):
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NO_SUCH_CHANNEL,
+                "message": f"Channel #{channel} does not exist.",
+            })
+            return client
+        members = [
+            {"user_id": c.user_id, "username": c.username}
+            for c in self._conn.clients_in_channel(channel)
+        ]
+        await self._send(ws, {
+            "type": S2C.USER_LIST,
+            "channel": channel,
+            "users": members,
+        })
         return client
 
     async def _handle_ping(self, payload, ws, client):

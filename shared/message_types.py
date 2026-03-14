@@ -16,6 +16,7 @@ class C2S:
     NICK          = "nick"
     CREATE        = "create"
     LIST_CHANNELS = "list_channels"
+    LIST_MEMBERS  = "list_members"
     PING          = "ping"
     VOICE_JOIN    = "voice_join"
     VOICE_LEAVE   = "voice_leave"
