@@ -34,11 +34,11 @@ The repository SHALL contain `deploy/traxus-server.service` that runs the Traxus
 - **THEN** `TRAXUS_HOST` SHALL be set to `127.0.0.1` so the server is not directly reachable from outside the VPS
 
 ### Requirement: Operator deployment guide exists
-The repository SHALL contain `deploy/deploy.md` with step-by-step instructions for deploying the Traxus server on an Oracle Cloud Free Tier Ubuntu 24.04 VM with Duck DNS and Caddy.
+The repository SHALL contain `deploy/deploy.md` with step-by-step instructions for deploying the Traxus server on an Ubuntu 24.04 VPS with Duck DNS and Caddy.
 
 #### Scenario: Guide covers VM provisioning
 - **WHEN** an operator reads `deploy/deploy.md`
-- **THEN** they SHALL find instructions for creating an Oracle Cloud Always Free ARM instance and configuring its security list to allow ports 22, 80, and 443
+- **THEN** they SHALL find instructions for provisioning an Ubuntu 24.04 VPS and configuring the provider firewall to allow ports 22, 80, and 443
 
 #### Scenario: Guide covers Duck DNS setup
 - **WHEN** an operator reads `deploy/deploy.md`

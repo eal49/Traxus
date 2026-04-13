@@ -63,7 +63,7 @@ runs anywhere Python does.
 
 **Self-hostable in minutes**
 - Single asyncio WebSocket server, no database required
-- Deploy on Oracle Cloud Always Free (ARM, 1 OCPU / 6 GB RAM — $0/month)
+- Deploy on any Ubuntu 24.04 VPS (OVH, Hetzner, Linode, etc.)
 - TLS via Caddy + Let's Encrypt, subdomain via Duck DNS
 - systemd service file included — see [deploy/deploy.md](deploy/deploy.md)
 
@@ -118,7 +118,7 @@ pip install sounddevice numpy
 | [docs/commands.md](docs/commands.md) | Every slash command — syntax, arguments, server effects, error conditions |
 | [docs/protocol.md](docs/protocol.md) | Full WebSocket protocol — every C2S and S2C message type with field tables |
 | [docs/server-rules.md](docs/server-rules.md) | Server business rules — auth, validation, broadcast scope, state invariants |
-| [deploy/deploy.md](deploy/deploy.md) | VPS deployment guide — Oracle Cloud + Duck DNS + Caddy + systemd |
+| [deploy/deploy.md](deploy/deploy.md) | VPS deployment guide — Ubuntu 24.04 + Duck DNS + Caddy + systemd |
 
 ---
 

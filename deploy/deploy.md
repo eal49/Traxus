@@ -1,31 +1,24 @@
 # Traxus Server — VPS Deployment Guide
 
-Target: Oracle Cloud Always Free (ARM Ampere A1, Ubuntu 24.04) + Duck DNS + Caddy + systemd.
+Target: Any Ubuntu 24.04 VPS (x86-64) + Duck DNS + Caddy + systemd.
 
 ---
 
-## 1. Oracle Cloud VM Provisioning
+## 1. VPS Provisioning
 
-1. Sign in to [cloud.oracle.com](https://cloud.oracle.com) and navigate to **Compute → Instances → Create Instance**.
-2. Choose a name (e.g. `traxus-server`).
-3. Under **Image and shape**, click **Change image** → select **Ubuntu 24.04**.
-4. Under **Shape**, click **Change shape** → select **Ampere** → choose `VM.Standard.A1.Flex` with **1 OCPU** and **6 GB RAM** (Always Free eligible).
-5. Under **Add SSH keys**, upload your public key (`~/.ssh/id_rsa.pub`) or paste it in.
-6. Click **Create**.
+Provision a VPS running **Ubuntu 24.04 LTS** (x86-64) with at least 1 vCore and 1 GB RAM. Any provider works (OVH, Hetzner, Linode, etc.).
 
-**Open ports in the Security List:**
+**Open the required ports** in your provider's firewall / security group panel:
 
-Once the instance is running, go to its **VCN → Security List** and add three ingress rules:
-
-| Source CIDR | Protocol | Port | Description |
-|---|---|---|---|
-| 0.0.0.0/0 | TCP | 22 | SSH |
-| 0.0.0.0/0 | TCP | 80 | HTTP (ACME challenge) |
-| 0.0.0.0/0 | TCP | 443 | HTTPS / WSS |
+| Protocol | Port | Purpose |
+|---|---|---|
+| TCP | 22 | SSH |
+| TCP | 80 | HTTP (ACME challenge for Let's Encrypt) |
+| TCP | 443 | HTTPS / WSS |
 
 Do **not** open port 8765 — the server binds to loopback only.
 
-Note the **Public IP address** of your instance for the next step.
+Note the **public IP address** of your instance for the next step.
 
 ---
 
@@ -135,36 +128,6 @@ sudo ufw enable
 sudo ufw status
 ```
 
-**Oracle Cloud iptables fix (required)**
-
-Oracle Cloud Ubuntu images ship with an iptables REJECT rule that fires *before* UFW's
-rules, blocking all traffic except SSH even when UFW is correctly configured. Verify and
-remove it:
-
-```bash
-# Confirm the REJECT rule exists (look for a REJECT line before the ufw-* rules)
-sudo iptables -L INPUT -n --line-numbers
-```
-
-You will see something like:
-
-```
-num  target     prot opt source          destination
-...
-5    REJECT     0    --  0.0.0.0/0       0.0.0.0/0    reject-with icmp-host-prohibited
-6    ufw-before-logging-input  ...
-```
-
-Delete that REJECT rule and persist the change:
-
-```bash
-sudo iptables -D INPUT 5
-sudo netfilter-persistent save
-```
-
-After this, UFW's ALLOW rules for ports 80 and 443 take effect and Caddy can complete
-the ACME challenge.
-
 ---
 
 ## 7. Verification
@@ -172,7 +135,7 @@ the ACME challenge.
 Check that the server is reachable over WSS. Install `websocat`:
 
 ```bash
-curl -L https://github.com/vi/websocat/releases/latest/download/websocat.aarch64-unknown-linux-musl -o websocat
+curl -L https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl -o websocat
 chmod +x websocat
 ./websocat wss://YOUR-NAME.duckdns.org
 # Type {"type":"auth","username":"test"} and press Enter

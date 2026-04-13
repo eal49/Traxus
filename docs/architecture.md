@@ -30,7 +30,7 @@ as a minimal Discord/TeamSpeak that runs entirely in a terminal.
 │                        INTERNET                                     │
 │                                                                     │
 │   ┌──────────┐    wss://443    ┌──────────────────────────────────┐ │
-│   │ Client A ├────────────────►│        Oracle Cloud VPS          │ │
+│   │ Client A ├────────────────►│             VPS                  │ │
 │   │ (Textual │◄────────────────│                                  │ │
 │   │  TUI)    │                 │  ┌───────────┐   ┌────────────┐ │ │
 │   └──────────┘                 │  │   Caddy    │   │  Traxus    │ │ │
@@ -772,11 +772,11 @@ thread. If `play()` ever blocked, it would freeze the entire TUI for all users.
 │        │  TCP :443 (TLS/WSS)                                        │
 │        │                                                             │
 │   ┌────▼─────────────────────────────────────────────────────────┐   │
-│   │              Oracle Cloud VPS (ARM Ampere A1)                │   │
-│   │              Ubuntu 24.04, 1 OCPU, 6 GB RAM                  │   │
+│   │                   VPS (Ubuntu 24.04, x86-64)                  │   │
+│   │                   1 vCore, 1+ GB RAM                         │   │
 │   │                                                              │   │
 │   │   ┌──────────────────────────────────────────────────────┐   │   │
-│   │   │                 VCN Security List                     │   │   │
+│   │   │           Provider Firewall / Security Group          │   │   │
 │   │   │   ┌────────┬──────────┬──────────────────────────┐   │   │   │
 │   │   │   │ Port   │ Protocol │ Purpose                  │   │   │   │
 │   │   │   ├────────┼──────────┼──────────────────────────┤   │   │   │
@@ -861,26 +861,7 @@ traxus.duckdns.org {
 This single-line config gives you: TLS 1.3, HTTP/2, automatic HTTPS redirect,
 and WebSocket proxying.
 
-### 7.4. Oracle Cloud iptables Caveat
-
-Oracle Cloud Ubuntu images ship with a default iptables REJECT rule that fires
-**before** UFW rules, blocking all non-SSH traffic even when UFW allows it.
-
-```
-# Before fix — REJECT rule at position 5 blocks ports 80/443:
-num  target     prot opt source          destination
-...
-5    REJECT     0    --  0.0.0.0/0       0.0.0.0/0    reject-with icmp-host-prohibited
-6    ufw-before-logging-input  ...
-
-# Fix:
-sudo iptables -D INPUT 5
-sudo netfilter-persistent save
-```
-
-This is a one-time fix required after VPS provisioning.
-
-### 7.5. systemd Service
+### 7.4. systemd Service
 
 ```ini
 [Unit]
@@ -909,7 +890,7 @@ WantedBy=multi-user.target
   it crashes.
 - **No root required** — runs as the `ubuntu` user.
 
-### 7.6. Server Dependencies
+### 7.5. Server Dependencies
 
 ```
 # deploy/requirements-server.txt
@@ -920,11 +901,11 @@ numpy>=1.26
 The server does not need `textual`, `sounddevice`, or any client dependencies.
 `numpy` is required for the ADPCM codec used in voice relay.
 
-### 7.7. Infrastructure Summary
+### 7.6. Infrastructure Summary
 
 | Component | Role | Details |
 |-----------|------|---------|
-| Oracle Cloud A1 | VPS | ARM Ampere, 1 OCPU, 6 GB RAM, Always Free |
+| VPS (any provider) | VPS | Ubuntu 24.04, x86-64, 1+ vCore / 1+ GB RAM |
 | Ubuntu 24.04 | OS | Python 3.12, systemd |
 | Duck DNS | Dynamic DNS | Free subdomain → VPS public IP |
 | Caddy | Reverse proxy | TLS termination, auto Let's Encrypt, WSS→WS |
