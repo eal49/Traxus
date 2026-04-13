@@ -46,6 +46,7 @@ class WsWorker:
         self._send_queue: asyncio.Queue[str] = asyncio.Queue()
         self._binary_send_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._running = False
+        self._authenticated = False
 
     # ── Public API (called from Textual event handlers) ───────────────────────
 
@@ -56,6 +57,10 @@ class WsWorker:
     def enqueue_binary(self, data: bytes) -> None:
         """Queue raw bytes to be sent as a binary frame."""
         self._binary_send_queue.put_nowait(data)
+
+    def notify_auth_ok(self) -> None:
+        """Called by the app when auth_ok is received; enables reconnect on future drops."""
+        self._authenticated = True
 
     def stop(self) -> None:
         """Signal the worker to stop reconnecting."""
@@ -94,9 +99,15 @@ class WsWorker:
                     )
 
             except (OSError, websockets.exceptions.WebSocketException) as exc:
+                self._ws = None
+                if not self._authenticated:
+                    # First connection attempt failed — report to login screen and stop.
+                    log.warning("Initial WS connection failed: %s", exc)
+                    self._post_state("failed", self._friendly_error(exc))
+                    return
+
                 log.warning("WS error: %s — retrying in %.0fs", exc, delay)
                 self._post_state("reconnecting", str(exc))
-                self._ws = None
 
                 if not self._running:
                     break
@@ -174,3 +185,13 @@ class WsWorker:
     def _post_state(self, state: str, detail: str = "") -> None:
         from client.app import TraxusApp
         self._app.post_message(TraxusApp.ConnectionStateChanged(state, detail))
+
+    @staticmethod
+    def _friendly_error(exc: Exception) -> str:
+        """Return a short, user-readable description of a connection error."""
+        msg = str(exc).lower()
+        if "connect" in msg or isinstance(exc, OSError):
+            return "Could not connect — check the server address."
+        if "handshake" in msg or "reject" in msg or "403" in msg or "404" in msg:
+            return "Server rejected the connection — wrong URL or server version mismatch."
+        return "Connection failed — check the server address and try again."

@@ -417,6 +417,8 @@ class TraxusApp(App):
         match t:
             case "auth_ok":
                 self.username = payload.get("username", self.username)
+                if self._ws_worker:
+                    self._ws_worker.notify_auth_ok()
                 # Switch to chat screen
                 from client.screens.chat_screen import ChatScreen
                 self.switch_screen(ChatScreen())
@@ -531,6 +533,16 @@ class TraxusApp(App):
     ) -> None:
         self.connection_state = msg.state
         chat = self._chat()
+        if msg.state == "failed":
+            # Initial connection failed — surface the error on the login screen.
+            try:
+                screen = self.screen
+                if isinstance(screen, LoginScreen):
+                    screen.show_error(msg.detail)
+                    screen.reset_form()
+            except Exception:
+                pass
+            return
         if chat:
             chat.update_status(msg.state, nick=self.username)
             if msg.state == "reconnecting":

@@ -590,5 +590,94 @@ class TestSettingsCommand(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.screen)
 
 
+# ── Connection failure feedback ───────────────────────────────────────────────
+
+class TestConnectionErrorFeedback(unittest.IsolatedAsyncioTestCase):
+    """
+    When a ConnectionStateChanged(state="failed") message is posted while the
+    LoginScreen is active, the app must surface the error message on the login
+    screen and must not crash.
+    """
+
+    async def test_failed_state_shows_error_on_login_screen(self):
+        """state='failed' must call show_error on LoginScreen with the detail."""
+        from unittest.mock import MagicMock
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            self.assertIsInstance(app.screen, LoginScreen)
+
+            # Patch show_error on the live instance before the message fires.
+            login = app.screen
+            calls: list[str] = []
+            original_show = login.show_error
+            login.show_error = lambda msg: calls.append(msg) or original_show(msg)  # type: ignore[method-assign]
+
+            app.post_message(TraxusApp.ConnectionStateChanged(
+                state="failed",
+                detail="Could not connect — check the server address.",
+            ))
+            await pilot.pause()
+
+            self.assertTrue(calls, "show_error must have been called on LoginScreen")
+            self.assertIn(
+                "Could not connect",
+                calls[0],
+                "show_error must receive the failure detail string",
+            )
+
+    async def test_failed_state_does_not_crash_on_chat_screen(self):
+        """state='failed' when LoginScreen is not present must not raise."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+
+            # Should not raise even though LoginScreen is not queryable
+            app.post_message(TraxusApp.ConnectionStateChanged(
+                state="failed",
+                detail="Could not connect — check the server address.",
+            ))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ChatScreen)
+
+
+class TestWsWorkerAuthFlag(unittest.TestCase):
+    """
+    Unit tests for WsWorker._authenticated flag and notify_auth_ok().
+    These tests verify the flag logic without running the full async worker.
+    """
+
+    def _make_worker(self):
+        from unittest.mock import MagicMock
+        from client.ws_worker import WsWorker
+        app = MagicMock()
+        return WsWorker(app)
+
+    def test_authenticated_starts_false(self):
+        worker = self._make_worker()
+        self.assertFalse(worker._authenticated)
+
+    def test_notify_auth_ok_sets_flag(self):
+        worker = self._make_worker()
+        worker.notify_auth_ok()
+        self.assertTrue(worker._authenticated)
+
+    def test_friendly_error_masks_os_error(self):
+        from client.ws_worker import WsWorker
+        msg = WsWorker._friendly_error(OSError("Connection refused"))
+        self.assertNotIn("OSError", msg)
+        self.assertNotIn("Connection refused", msg)
+        self.assertLess(len(msg), 120)
+
+    def test_friendly_error_masks_websocket_exception(self):
+        import websockets.exceptions
+        from client.ws_worker import WsWorker
+        exc = websockets.exceptions.WebSocketException("rejected handshake")
+        msg = WsWorker._friendly_error(exc)
+        self.assertNotIn("WebSocketException", msg)
+        self.assertLess(len(msg), 120)
+
+
 if __name__ == "__main__":
     unittest.main()

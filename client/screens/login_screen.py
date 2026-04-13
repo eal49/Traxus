@@ -91,3 +91,9 @@ class LoginScreen(Screen):
     def show_error(self, msg: str) -> None:
         label = self.query_one("#error-label", Label)
         label.update(f"[bold #ed4245]{msg}[/bold #ed4245]" if msg else "")
+
+    def reset_form(self) -> None:
+        """Re-enable the connect button and return focus to the server URL field."""
+        btn = self.query_one("#connect-btn", Button)
+        btn.disabled = False
+        self.query_one("#server-input", Input).focus()
