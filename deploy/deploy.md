@@ -79,13 +79,27 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo 
 sudo apt update && sudo apt install -y caddy
 ```
 
-Copy and edit the Caddyfile:
+Write the Caddyfile, substituting your actual subdomain:
 
 ```bash
-sudo cp ~/traxus/deploy/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile
-# Replace YOUR-NAME.duckdns.org with your actual subdomain
+sudo tee /etc/caddy/Caddyfile > /dev/null << 'EOF'
+YOUR-NAME.duckdns.org {
+    reverse_proxy localhost:8765
+}
+EOF
 ```
+
+The complete file should look like this (example for `traxus.duckdns.org`):
+
+```
+traxus.duckdns.org {
+    reverse_proxy localhost:8765
+}
+```
+
+Caddy's `reverse_proxy` directive transparently upgrades WebSocket connections,
+so no extra `header` or `websocket` stanza is needed. The bare site block is
+sufficient — Caddy handles ACME, TLS termination, and WS upgrade automatically.
 
 Enable and start Caddy:
 
@@ -103,7 +117,7 @@ Caddy will automatically obtain a Let's Encrypt certificate on first startup. Po
 Copy the service file and reload systemd:
 
 ```bash
-sudo cp ~/traxus/deploy/traxus-server.service /etc/systemd/system/
+sudo cp ~/Traxus/deploy/traxus-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now traxus-server
 sudo systemctl status traxus-server   # should show "active (running)"
@@ -119,6 +133,8 @@ sudo journalctl -u traxus-server -f
 
 ## 6. Firewall
 
+### Option A — UFW (simpler, recommended if you have no existing rules)
+
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
@@ -127,6 +143,45 @@ sudo ufw deny 8765/tcp
 sudo ufw enable
 sudo ufw status
 ```
+
+### Option B — iptables (if you manage rules directly)
+
+If you already use iptables, skip UFW entirely — enabling it on top of existing iptables rules can cause conflicts.
+
+The minimum required ruleset:
+
+```bash
+# Allow established/related return traffic (critical — without this, outbound
+# replies are dropped and Caddy cannot reach Let's Encrypt)
+sudo iptables -I INPUT 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Allow inbound SSH, HTTP (ACME challenge), and HTTPS
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Block direct access to the Traxus backend (loopback only)
+sudo iptables -A INPUT -p tcp --dport 8765 -j DROP
+
+# Drop everything else
+sudo iptables -A INPUT -j DROP
+```
+
+Persist rules across reboots:
+
+```bash
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+> **Note:** Ubuntu 24.04 defaults to the nftables backend. If `iptables --version`
+> shows `(nf_tables)`, the `iptables` command is a compatibility shim. Rules
+> saved via `iptables-persistent` may not survive reboots in this case — use
+> `nft` directly instead, or install `iptables-legacy` and pin the alternative:
+> ```bash
+> sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+> sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+> ```
 
 ---
 
@@ -173,3 +228,86 @@ sudo systemctl restart traxus-server
 ```
 
 Note: a restart clears all in-memory state (channels reset to defaults, history lost).
+
+---
+
+## Troubleshooting
+
+### Caddy cannot obtain a TLS certificate
+
+**Symptom:** `journalctl -u caddy` shows repeated `HTTP request failed; retrying` against
+`acme-v02.api.letsencrypt.org`, then `could not get certificate from issuer`.
+
+**Cause:** Caddy must make outbound HTTPS requests to Let's Encrypt to complete the ACME
+challenge. If your INPUT chain has a blanket DROP rule at the bottom but no rule accepting
+established/related return traffic, reply packets from Let's Encrypt are dropped.
+
+**Fix:** Insert the conntrack rule at the top of INPUT (before any DROP):
+
+```bash
+sudo iptables -I INPUT 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo netfilter-persistent save
+```
+
+Verify outbound is now working:
+
+```bash
+curl -I https://acme-v02.api.letsencrypt.org/directory
+# Expect: HTTP/2 200
+```
+
+---
+
+### Caddy starts but does not attempt certificate renewal
+
+**Symptom:** After fixing the iptables rule and restarting Caddy, the `tls.obtain` log
+messages no longer appear — Caddy never tries to obtain the certificate.
+
+**Cause:** Caddy uses exponential backoff after repeated ACME failures. The backoff state
+is stored on disk and survives restarts.
+
+**Fix:** Clear the cached ACME state and restart:
+
+```bash
+sudo systemctl stop caddy
+sudo rm -rf /var/lib/caddy/.local/share/caddy/certificates/
+sudo systemctl start caddy
+sudo journalctl -u caddy -f
+# Expect: "certificate obtained successfully" within ~30 seconds
+```
+
+---
+
+### EOF errors in Caddy logs from unknown IPs
+
+**Symptom:** `journalctl -u caddy` shows repeated `"msg":"EOF"` errors from IP addresses
+you do not recognise hitting port 80.
+
+**Cause:** Normal internet scanner traffic. Public port 80 receives constant automated
+probes. These are harmless and unrelated to the ACME challenge or Traxus functionality.
+
+---
+
+### iptables rules lost after reboot
+
+**Symptom:** Firewall rules are correct after manual setup but disappear on reboot.
+
+**Cause:** Either `iptables-persistent` is not installed, or Ubuntu 24.04's nftables
+backend is active and the `iptables` shim rules are not persisted by `netfilter-persistent`.
+
+**Fix:** Check which backend is active:
+
+```bash
+iptables --version
+# "legacy" → use iptables-persistent as normal
+# "nf_tables" → pin the legacy backend first:
+sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+```
+
+Then save:
+
+```bash
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+```
