@@ -663,7 +663,46 @@ Byte    Field
 pump). **Decoding** happens in the playback daemon thread (also off the pump).
 This ensures the TUI never blocks on codec operations.
 
-### 6.5. PTT (Push-to-Talk) State Machine
+### 6.5. Spectral Noise Suppression
+
+Before a captured PCM block is ADPCM-encoded and sent, it passes through a
+pure-numpy spectral subtraction filter (`_SpectralNoiseSuppressor` in
+`client/audio_engine.py`).
+
+**Algorithm (Boll 1979 spectral subtraction):**
+```
+  indata (320 samples, int16)
+      │
+      ├─── rfft ──► X[k]         complex spectrum, 161 bins (0–8 kHz)
+      │
+      ├─── power  ► P_x[k] = |X[k]|²
+      │
+      ├─── noise model update (EMA)
+      │         SNR < 3 dB → α_fast = 0.15  (noise frame, update quickly)
+      │         SNR ≥ 3 dB → α_slow = 0.005 (voice frame,  update slowly)
+      │         N̂[k] ← α·P_x[k] + (1−α)·N̂[k]
+      │
+      ├─── subtract
+      │         P_y[k] = max( P_x[k] − 1.5·N̂[k],  0.05·P_x[k] )
+      │                       ─────────────────     ────────────
+      │                        over-subtraction      spectral floor
+      │
+      ├─── gain   ► G[k] = √(P_y[k] / P_x[k])
+      │
+      ├─── apply  ► Ŷ[k] = X[k] · G[k]    (phase unchanged)
+      │
+      └─── irfft ──► ŷ[n]  cleaned PCM → ADPCM encode → wire
+```
+
+The filter runs on **every captured frame** (not only during PTT) so the noise
+model is always warm when the user starts transmitting.
+
+**Cost:** ~0.3 ms per 20 ms frame ≈ 1.5 % extra CPU.  
+**Dependencies:** numpy only — already required for ADPCM; no new install.  
+**Graceful degradation:** `NS_AVAILABLE = AUDIO_AVAILABLE`. When numpy is
+absent, `_suppressor` is `None` and the raw PCM path is unchanged.
+
+### 6.6. PTT (Push-to-Talk) State Machine
 
 ```
                     ┌─────────────────┐
@@ -1010,7 +1049,24 @@ matters on bandwidth-constrained connections and reduces server relay load.
 or another standard codec. ADPCM quality is lower than Opus, but has zero
 external dependencies beyond numpy.
 
-### 9.5. Caddy for TLS Termination
+### 9.5. Spectral Subtraction for Noise Suppression
+
+**Decision:** Capture-side noise reduction uses a pure-numpy spectral
+subtraction implementation rather than a third-party C extension.
+
+**Why:** `speexdsp` and `webrtc-noise-gain` — the natural choices — have no
+prebuilt wheels for Python 3.14 on Windows; they require SWIG and a C compiler.
+`noisereduce` (pure Python) works but is batch-oriented and adds 500 ms of
+latency. Spectral subtraction (Boll 1979) can be implemented in ~50 lines of
+numpy and runs in ~0.3 ms per 20 ms frame with no new dependencies.
+
+**Trade-off:** A C library (SpeexDSP or RNNoise) would give better quality on
+non-stationary noise (keyboard clicks, sudden sounds). The numpy implementation
+is excellent for stationary noise (fans, AC, hum) and adequate for voice chat.
+If prebuilt wheels become available for Python 3.14, the `_SpectralNoiseSuppressor`
+class can be swapped out without touching the rest of `audio_engine.py`.
+
+### 9.6. Caddy for TLS Termination
 
 **Decision:** Use Caddy as a reverse proxy instead of adding TLS to the Python
 server.

@@ -84,11 +84,20 @@ Calling `AudioEngine.start()` when the stream is already open SHALL be a no-op.
 ---
 
 ### Requirement: AudioEngine encodes captured audio to ADPCM
-When ADPCM is available (numpy importable), the AudioEngine SHALL encode captured PCM frames to ADPCM before queuing them for transmission.
+When ADPCM is available (numpy importable), the AudioEngine SHALL encode captured PCM frames to ADPCM before queuing them for transmission. If noise suppression is also available (`NS_AVAILABLE` is `True`), the NS filter SHALL be applied to the PCM frame before ADPCM encoding.
 
-#### Scenario: Captured frame is compressed before queuing
-- **WHEN** PTT is active and a PCM block arrives in the sounddevice callback
-- **THEN** the block SHALL be encoded via `shared/adpcm.encode()` before being placed on the capture queue
+The processing order for a captured frame is:
+1. (Optional) `_SpectralNoiseSuppressor.process(pcm)` — only when `NS_AVAILABLE` is `True`
+2. `shared/adpcm.encode(pcm)` — only when ADPCM is available
+3. Place encoded (or raw) frame on the capture queue
+
+#### Scenario: Captured frame is noise-suppressed then compressed before queuing
+- **WHEN** PTT is active and a PCM block arrives in the sounddevice callback and both `NS_AVAILABLE` and ADPCM are available
+- **THEN** the block SHALL first be passed through `_SpectralNoiseSuppressor.process()`, then encoded via `shared/adpcm.encode()` before being placed on the capture queue
+
+#### Scenario: Captured frame is compressed before queuing (NS unavailable)
+- **WHEN** PTT is active and a PCM block arrives in the sounddevice callback and ADPCM is available but `NS_AVAILABLE` is `False`
+- **THEN** the block SHALL be encoded via `shared/adpcm.encode()` before being placed on the capture queue (no NS filter applied)
 
 #### Scenario: Fallback to raw PCM when numpy unavailable
 - **WHEN** numpy is not importable at startup
