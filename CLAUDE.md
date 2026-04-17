@@ -23,9 +23,10 @@ into three packages that share one asyncio event loop on the client side.
 shared/          ← constants and binary framing (no I/O, no framework deps)
 server/          ← asyncio WebSocket server
 client/          ← Textual TUI + WebSocket client
-tests/           ← pytest suite (unit + integration)
+tests/           ← unittest suite (unit + integration)
 docs/            ← user-facing documentation
 openspec/        ← feature specs and design artefacts
+RELEASE_NOTES.md ← edited before every git tag (see Releasing below)
 ```
 
 ### shared/
@@ -93,11 +94,15 @@ python -m client.main
 |---|---|---|
 | `app.py` | `TraxusApp` | Root `App`; owns reactive state, routes server messages to ChatScreen |
 | `ws_worker.py` | `WsWorker` | Three asyncio loops: recv, send, ping; posts messages to app |
-| `audio_engine.py` | `AudioEngine` | Microphone capture + speaker playback |
+| `audio_engine.py` | `AudioEngine` | Microphone capture + speaker playback; noise suppression; VAD; per-user volume |
 | `commands.py` | — | `parse_input()` → `ParsedCommand`; `HELP_TEXT` |
+| `settings.py` | — | `load()` / `save()` — persists JSON settings to `~/.traxus/settings.json` |
 | `screens/login_screen.py` | `LoginScreen` | Server URL + username form |
 | `screens/chat_screen.py` | `ChatScreen` | Main chat view; delegates display to widgets |
+| `screens/settings_screen.py` | `SettingsScreen` | Modal settings panel (PTT mode/key, noise suppression toggle) |
+| `screens/vad_calibration_screen.py` | `VadCalibrationScreen` | Guided ambient-noise calibration for VAD threshold |
 | `widgets/channel_sidebar.py` | `ChannelSidebar` | Left panel — text and voice channels |
+| `widgets/member_panel.py` | `MemberPanel` | Right panel — members list + per-user volume bars (keyboard-navigable) |
 | `widgets/message_view.py` | `MessageView` | Scrolling `RichLog` of chat messages |
 | `widgets/input_bar.py` | `InputBar` | Single-line `Input` widget at the bottom |
 | `widgets/status_bar.py` | `StatusBar` | Connection state, nick, latency, PTT indicator |
@@ -155,13 +160,36 @@ action_ptt_toggle()
 ```
 WsWorker._recv_loop → TraxusApp.AudioFrame posted
   └─ on_traxus_app_audio_frame (Textual pump, sync handler)
-       └─ AudioEngine.play(pcm_bytes)  ← queue.put_nowait, returns in ~4 µs
-            └─ _playback_worker thread  ← sd.OutputStream.write() (blocking, off-pump)
+       └─ AudioEngine.play(pcm_bytes, codec, username)  ← queue.put_nowait, returns in ~4 µs
+            └─ _playback_worker thread  ← ADPCM decode → per-user gain → sd.OutputStream.write()
 ```
 
 **Critical:** `play()` must never block the Textual message pump. The single
 `sd.OutputStream` is owned by a daemon thread. Only `queue.put_nowait()` is
 called on the pump — that takes nanoseconds.
+
+#### Per-user volume
+
+`AudioEngine` tracks a `_per_user_volume: dict[str, int]` (0–200, default 100).
+`MemberPanel` reads and writes it via `get_volume(username)` / `set_volume(username, level)`.
+Gain is applied in `_playback_worker` after decoding: `np.clip(pcm * level/100, -32768, 32767)`.
+The 100% fast-path skips the multiply entirely.
+
+#### Noise suppression
+
+A `_SpectralNoiseSuppressor` runs in the `sd.InputStream` callback on the capture side.
+Controlled by `AudioEngine.noise_suppression_enabled` (default `True`); toggled from
+`SettingsScreen`. Guard: `NS_AVAILABLE` mirrors `AUDIO_AVAILABLE` (requires numpy).
+
+#### PTT modes
+
+| Mode | Trigger | Key / binding |
+|---|---|---|
+| Toggle | Single press arms/disarms | F9 (default) or user-configured |
+| Hold | Hold to transmit, release to stop | Configurable key or mouse button |
+| VAD | Voice activity auto-detects speech | No key required; threshold calibrated via `VadCalibrationScreen` |
+
+PTT mode and key are stored in `settings.json` and loaded on mount.
 
 ---
 
@@ -210,7 +238,15 @@ hardcode the raw string in server or client code.
 
 `AUDIO_AVAILABLE` is set at import time based on whether `sounddevice` and
 `numpy` are importable. Every voice code path checks this flag and shows a user
-message instead of crashing when the flag is `False`.
+message instead of crashing when the flag is `False`. `NS_AVAILABLE` and
+`ADPCM_AVAILABLE` follow the same pattern for their respective features.
+
+### 6. Settings persistence
+
+`client/settings.py` exposes `load() -> dict` and `save(data: dict) -> None`.
+Settings are stored at `~/.traxus/settings.json`. `_DEFAULTS` defines the
+canonical key set and fallback values — add new keys there, never hard-code
+defaults elsewhere.
 
 ---
 
@@ -243,14 +279,46 @@ same pattern.
 
 | Test file | What it covers |
 |---|---|
-| `test_app.py` | Unit tests for TraxusApp including `TestPttF9Binding` (5 tests) |
+| `test_adpcm.py` | ADPCM encode/decode round-trips |
+| `test_app.py` | TraxusApp unit tests including PTT bindings |
+| `test_audio_engine.py` | AudioEngine: noise suppression flag, per-user volume, playback gain |
 | `test_channel_registry.py` | ChannelRegistry CRUD and validation |
 | `test_commands.py` | `parse_input()` for all slash commands |
 | `test_connection_manager.py` | ConnectedClient registration, broadcast, nick change |
+| `test_member_panel.py` | MemberPanel rendering, volume bar, keyboard navigation |
 | `test_message_router.py` | MessageRouter dispatch for every C2S message type |
 | `test_message_view_utils.py` | Rich markup formatting helpers |
 | `test_multiclient_ptt.py` | Multi-client audio relay; Textual pump latency during burst |
+| `test_noise_suppression_demo.py` | Spectral suppressor effectiveness; generates `tests/noise_suppression_demo.png` |
 | `test_ptt_e2e.py` | Full integration: real server subprocess + Textual pilot |
+| `test_ptt_hold_mode.py` | PTT hold-mode debounce behaviour |
+| `test_ptt_mouse.py` | Mouse-button PTT binding |
+| `test_settings.py` | Settings load/save/defaults round-trips |
+| `test_vad_calibration.py` | VAD calibration screen logic |
+| `test_vad_mode.py` | VAD onset, hangover, sensitivity |
 | `test_voice_protocol.py` | Binary frame pack/unpack round-trip |
 
 **Mandatory:** every edit must leave `python -m unittest discover -s tests -v` fully green.
+
+---
+
+## Releasing
+
+Before creating a git tag, **always edit `RELEASE_NOTES.md`** in the repo root to
+describe what changed. The GitHub Actions release workflow reads this file and
+includes it at the top of the published release body.
+
+```bash
+# 1. Edit release notes
+#    Update RELEASE_NOTES.md — describe new features, fixes, breaking changes.
+
+# 2. Commit, tag, push
+git add RELEASE_NOTES.md
+git commit -m "Prepare release vX.Y.Z"
+git tag vX.Y.Z
+git push origin master --tags
+```
+
+The `release.yml` workflow triggers on `v*.*.*` tags, runs the test suite,
+builds the Windows `.exe`, and publishes the GitHub release with the contents
+of `RELEASE_NOTES.md` prepended to the download/requirements boilerplate.
