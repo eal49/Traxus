@@ -280,6 +280,10 @@ class AudioEngine:
         self._vad_callback = None          # callable(is_voice: bool) | None
         self._vad_voice_state: bool = False  # last reported VAD state
         self._energy_callback = None       # callable(rms: float) | None
+        self._spectrum_callback = None     # callable(pcm_bytes: bytes) | None
+
+        # Loopback: route captured audio to the playback queue (mic test mode)
+        self.loopback_enabled: bool = False
 
         # Playback: a thread-safe queue drained by a background thread.
         # Items are (codec, audio_bytes, username) tuples; None is the shutdown sentinel.
@@ -347,11 +351,20 @@ class AudioEngine:
         self._vad_active = False
         self._vad_callback = None
         self._energy_callback = None
+        self._spectrum_callback = None
         self.stop()
 
     def set_energy_callback(self, cb) -> None:
         """Register a callback fired with the raw RMS float on every audio frame."""
         self._energy_callback = cb
+
+    def set_spectrum_callback(self, cb) -> None:
+        """Register a callback fired with raw PCM bytes on every captured frame."""
+        self._spectrum_callback = cb
+
+    def set_loopback(self, enabled: bool) -> None:
+        """Enable or disable mic loopback to the playback queue."""
+        self.loopback_enabled = enabled
 
     # ── PTT state ─────────────────────────────────────────────────────────────
 
@@ -404,15 +417,23 @@ class AudioEngine:
         else:
             pcm_filtered = None   # NS unavailable or disabled; fall back to raw bytes below
 
-        if self._transmitting and self._loop is not None:
-            if pcm_filtered is not None:
-                # Use NS-filtered PCM.  pcm_filtered is (frame_size,) int16;
-                # tobytes() produces the same 640 bytes as indata.tobytes()
-                # would for a (frame_size, 1) int16 array.
-                pcm_bytes = pcm_filtered.tobytes()
-            else:
-                pcm_bytes = indata.tobytes()
+        # Resolve the "best" PCM bytes for this frame (NS-filtered or raw).
+        if pcm_filtered is not None:
+            pcm_bytes = pcm_filtered.tobytes()
+        else:
+            pcm_bytes = indata.tobytes()
 
+        # Loopback: route captured audio straight to the playback queue.
+        if self.loopback_enabled and self._loop is not None:
+            self._loop.call_soon_threadsafe(
+                self._play_queue.put_nowait, (CODEC_RAW, pcm_bytes, "")
+            )
+
+        # Spectrum callback for visualisation (e.g. MicTestScreen).
+        if self._spectrum_callback is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self._spectrum_callback, pcm_bytes)
+
+        if self._transmitting and self._loop is not None:
             if ADPCM_AVAILABLE:
                 audio_bytes = _adpcm_encode(pcm_bytes)
                 codec = CODEC_ADPCM

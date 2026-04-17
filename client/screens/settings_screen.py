@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView
 
-from client.audio_engine import NS_AVAILABLE
+from client.audio_engine import AUDIO_AVAILABLE, NS_AVAILABLE
 
 _PTT_MODE_CYCLE = ["toggle", "hold", "vad"]
 _PTT_MODE_LABELS = {"toggle": "Toggle", "hold": "Hold", "vad": "VAD"}
@@ -71,12 +71,14 @@ class SettingsScreen(ModalScreen[str | None]):
             ListItem(Label(f"PTT Mode: {mode_label}"), id="item-ptt-mode"),
             ListItem(Label(self._sens_label()), id="item-vad-sensitivity"),
             ListItem(Label(self._ns_label()), id="item-noise-suppression"),
+            ListItem(Label("Test Microphone"), id="item-mic-test"),
             id="settings-list",
         )
 
     def on_mount(self) -> None:
         self._update_vad_sensitivity_visibility()
         self._update_noise_suppression_visibility()
+        self._update_mic_test_visibility()
 
     def _rebuild_settings_list(self) -> None:
         """Update labels in-place and show/hide conditional items."""
@@ -93,6 +95,7 @@ class SettingsScreen(ModalScreen[str | None]):
         )
         self._update_vad_sensitivity_visibility()
         self._update_noise_suppression_visibility()
+        self._update_mic_test_visibility()
 
     def _update_vad_sensitivity_visibility(self) -> None:
         current_mode = getattr(self.app, "_ptt_mode", "toggle")
@@ -100,6 +103,9 @@ class SettingsScreen(ModalScreen[str | None]):
 
     def _update_noise_suppression_visibility(self) -> None:
         self.query_one("#item-noise-suppression", ListItem).display = NS_AVAILABLE
+
+    def _update_mic_test_visibility(self) -> None:
+        self.query_one("#item-mic-test", ListItem).display = AUDIO_AVAILABLE
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item.id == "item-ptt-key":
@@ -111,6 +117,8 @@ class SettingsScreen(ModalScreen[str | None]):
             self._cycle_vad_sensitivity()
         elif event.item.id == "item-noise-suppression":
             self._toggle_noise_suppression()
+        elif event.item.id == "item-mic-test":
+            self._open_mic_test()
 
     def _on_ptt_key(self, new_key: str | None) -> None:
         """Callback from PttKeyScreen.  Forward the chosen key to the app."""
@@ -152,6 +160,10 @@ class SettingsScreen(ModalScreen[str | None]):
         engine.noise_suppression_enabled = not engine.noise_suppression_enabled
         save_settings(self._all_settings())
         self._rebuild_settings_list()
+
+    def _open_mic_test(self) -> None:
+        from client.screens.mic_test_screen import MicTestScreen
+        self.app.push_screen(MicTestScreen())
 
     def _open_calibration(self) -> None:
         from client.screens.vad_calibration_screen import VadCalibrationScreen
