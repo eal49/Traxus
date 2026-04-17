@@ -63,31 +63,42 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: traxus-windows
           path: dist/
 
+      - name: Build release body
+        run: |
+          cat RELEASE_NOTES.md > /tmp/release_body.md
+          cat >> /tmp/release_body.md << 'EOF'
+
+          ---
+
+          ## Download
+
+          | Platform | File |
+          |----------|------|
+          | Windows (64-bit) | `traxus-${{ github.ref_name }}-windows.exe` |
+
+          ## Requirements
+
+          - No Python installation needed — the `.exe` is self-contained.
+          - **Run from Windows Terminal or PowerShell** (not by double-clicking
+            from Explorer). See [deploy/windows-build-warnings.md](deploy/windows-build-warnings.md)
+            for details.
+
+          ## Connecting
+
+          Launch the app, enter your server URL (e.g. `wss://yourname.duckdns.org`)
+          and a username to connect.
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/traxus-${{ github.ref_name }}-windows.exe
-          generate_release_notes: true
-          body: |
-            ## Traxus ${{ github.ref_name }}
-
-            ### Download
-            | Platform | File |
-            |----------|------|
-            | Windows (64-bit) | `traxus-${{ github.ref_name }}-windows.exe` |
-
-            ### Requirements
-            - No Python installation needed — the `.exe` is self-contained.
-            - **Run from Windows Terminal or PowerShell** (not by double-clicking
-              from Explorer). See [deploy/windows-build-warnings.md](deploy/windows-build-warnings.md)
-              for details.
-
-            ### Connecting
-            Launch the app, enter your server URL (e.g. `wss://yourname.duckdns.org`)
-            and a username to connect.
+          body_path: /tmp/release_body.md
