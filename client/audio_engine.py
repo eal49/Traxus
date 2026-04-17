@@ -271,6 +271,9 @@ class AudioEngine:
         )
         self.noise_suppression_enabled: bool = True
 
+        # Per-user playback volume (integer %, 0–200, default 100)
+        self._per_user_volume: dict[str, int] = {}
+
         # VAD state
         self._vad_active: bool = False
         self._vad_threshold: float = 250.0
@@ -279,8 +282,8 @@ class AudioEngine:
         self._energy_callback = None       # callable(rms: float) | None
 
         # Playback: a thread-safe queue drained by a background thread.
-        # Items are (codec, audio_bytes) tuples; None is the shutdown sentinel.
-        self._play_queue: queue.Queue[tuple[int, bytes] | None] = queue.Queue(
+        # Items are (codec, audio_bytes, username) tuples; None is the shutdown sentinel.
+        self._play_queue: queue.Queue[tuple[int, bytes, str] | None] = queue.Queue(
             maxsize=_PLAY_QUEUE_MAX
         )
         self._play_thread: threading.Thread | None = None
@@ -360,6 +363,16 @@ class AudioEngine:
     def transmitting(self, value: bool) -> None:
         self._transmitting = value
 
+    # ── Per-user volume ────────────────────────────────────────────────────────
+
+    def get_volume(self, username: str) -> int:
+        """Return the playback volume for username as an integer percentage (0–200)."""
+        return self._per_user_volume.get(username, 100)
+
+    def set_volume(self, username: str, level: int) -> None:
+        """Set playback volume for username, clamped to [0, 200]."""
+        self._per_user_volume[username] = max(0, min(200, level))
+
     # ── Capture ───────────────────────────────────────────────────────────────
 
     def _compute_rms(self, indata) -> float:
@@ -421,16 +434,17 @@ class AudioEngine:
 
     # ── Playback ──────────────────────────────────────────────────────────────
 
-    def play(self, audio_bytes: bytes, codec: int = CODEC_RAW) -> None:
+    def play(self, audio_bytes: bytes, codec: int = CODEC_RAW, username: str = "") -> None:
         """Queue audio for playback.  Returns instantly — never blocks.
 
         ADPCM decode happens in the background playback thread, not here,
         so this method only does a queue.put_nowait() and returns in nanoseconds.
+        username is forwarded to the playback worker for per-user gain lookup.
         """
         if not AUDIO_AVAILABLE:
             return
         try:
-            self._play_queue.put_nowait((codec, audio_bytes))
+            self._play_queue.put_nowait((codec, audio_bytes, username))
         except queue.Full:
             # Playback thread is behind; drop the oldest frame and enqueue new.
             try:
@@ -438,7 +452,7 @@ class AudioEngine:
             except queue.Empty:
                 pass
             try:
-                self._play_queue.put_nowait((codec, audio_bytes))
+                self._play_queue.put_nowait((codec, audio_bytes, username))
             except queue.Full:
                 pass  # give up if still full
 
@@ -458,12 +472,18 @@ class AudioEngine:
                     item = self._play_queue.get()
                     if item is None:             # sentinel → shut down
                         break
-                    codec, audio_bytes = item
+                    codec, audio_bytes, username = item
                     if ADPCM_AVAILABLE and codec == CODEC_ADPCM:
                         pcm_bytes = _adpcm_decode(audio_bytes)
                     else:
                         pcm_bytes = audio_bytes
                     audio = np.frombuffer(pcm_bytes, dtype=np.int16)
+                    level = self._per_user_volume.get(username, 100)
+                    if level != 100:
+                        audio = np.clip(
+                            audio.astype(np.float32) * (level / 100.0),
+                            -32768, 32767,
+                        ).astype(np.int16)
                     out_stream.write(audio)
         except Exception:
             log.exception("Playback worker crashed")

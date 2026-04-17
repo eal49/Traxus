@@ -82,6 +82,184 @@ class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
             self.assertIn("alice", markup)
 
 
+# ── Volume bar and keyboard interaction tests ────────────────────────────────
+
+class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
+
+    async def _setup(self):
+        app = TraxusApp()
+        pilot_ctx = app.run_test()
+        pilot = await pilot_ctx.__aenter__()
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+        mp = app.screen.query_one("#members", MemberPanel)
+        return app, pilot, pilot_ctx, mp
+
+    async def test_default_volume_bar_shows_half_filled(self):
+        """Default volume (100%) must render 5 filled + 5 empty blocks."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertIn("█████░░░░░", markup)
+            self.assertIn("100%", markup)
+
+    async def test_volume_bar_reflects_set_volume(self):
+        """After set_volume(alice, 40), bar should show 2 filled + 8 empty blocks."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            app._audio_engine.set_volume("alice", 40)
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertIn("██░░░░░░░░", markup)
+            self.assertIn(" 40%", markup)
+
+    async def test_text_members_have_no_volume_bar(self):
+        """Members listed in the text section must not have a volume bar."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_members([{"username": "bob"}])
+            mp.update_voice([])
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertIn("bob", markup)
+            self.assertNotIn("█", markup)
+            self.assertNotIn("░", markup)
+
+    async def test_right_arrow_increases_volume(self):
+        """Pressing → while MemberPanel is focused must increase volume by 10."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            mp.focus()
+            await pilot.pause()
+
+            await pilot.press("right")
+            await pilot.pause()
+
+            self.assertEqual(app._audio_engine.get_volume("alice"), 110)
+
+    async def test_left_arrow_decreases_volume(self):
+        """Pressing ← while MemberPanel is focused must decrease volume by 10."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            mp.focus()
+            await pilot.pause()
+
+            await pilot.press("left")
+            await pilot.pause()
+
+            self.assertEqual(app._audio_engine.get_volume("alice"), 90)
+
+    async def test_left_at_0_does_not_go_below_0(self):
+        """Pressing ← when volume is 0 must stay at 0."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            app._audio_engine.set_volume("alice", 0)
+            mp.focus()
+            await pilot.pause()
+
+            await pilot.press("left")
+            await pilot.pause()
+
+            self.assertEqual(app._audio_engine.get_volume("alice"), 0)
+
+    async def test_right_at_200_does_not_exceed_200(self):
+        """Pressing → when volume is 200 must stay at 200."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}])
+            app._audio_engine.set_volume("alice", 200)
+            mp.focus()
+            await pilot.pause()
+
+            await pilot.press("right")
+            await pilot.pause()
+
+            self.assertEqual(app._audio_engine.get_volume("alice"), 200)
+
+    async def test_down_arrow_cycles_cursor(self):
+        """Pressing ↓ must move the cursor to the next voice user (wrapping)."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}, {"username": "bob"}])
+            mp.focus()
+            await pilot.pause()
+
+            self.assertEqual(mp._cursor, 0)
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertEqual(mp._cursor, 1)
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertEqual(mp._cursor, 0)  # wraps
+
+    async def test_no_crash_with_no_voice_users(self):
+        """Arrow keys with no voice users must not raise."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([])
+            mp.focus()
+            await pilot.pause()
+
+            try:
+                await pilot.press("left")
+                await pilot.press("right")
+                await pilot.press("up")
+                await pilot.press("down")
+                await pilot.pause()
+            except Exception as exc:
+                self.fail(f"Arrow key with no voice users raised: {exc}")
+
+    async def test_update_voice_resets_cursor(self):
+        """update_voice() must reset the cursor to 0."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.update_voice([{"username": "alice"}, {"username": "bob"}])
+            mp._cursor = 1
+            mp.update_voice([{"username": "charlie"}])
+            await pilot.pause()
+
+            self.assertEqual(mp._cursor, 0)
+
+
 # ── App-level member state tests ─────────────────────────────────────────────
 
 class TestMemberState(unittest.IsolatedAsyncioTestCase):

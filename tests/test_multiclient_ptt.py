@@ -152,9 +152,9 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
                 # Instrument play() to verify it returns instantly.
                 real_play = app._audio_engine.play
 
-                def timed_play(audio_bytes: bytes, codec: int = 0) -> None:
+                def timed_play(audio_bytes: bytes, codec: int = 0, username: str = "") -> None:
                     t0 = time.monotonic()
-                    real_play(audio_bytes, codec)
+                    real_play(audio_bytes, codec, username)
                     play_durations.append((time.monotonic() - t0) * 1000)
 
                 app._audio_engine.play = timed_play  # type: ignore[method-assign]

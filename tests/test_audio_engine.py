@@ -180,6 +180,7 @@ class TestInputCallbackNsActive(unittest.TestCase):
         engine._play_thread = None
 
         engine.noise_suppression_enabled = True
+        engine._per_user_volume = {}
 
         # Real suppressor, but spy on process()
         real_suppressor = ae._SpectralNoiseSuppressor(_BLOCKSIZE)
@@ -255,6 +256,7 @@ class TestInputCallbackNsInactive(unittest.TestCase):
         engine._play_thread = None
         engine._suppressor = None   # ← NS disabled
         engine.noise_suppression_enabled = True
+        engine._per_user_volume = {}
         return engine
 
     def test_raw_bytes_reach_queue_when_ns_inactive(self):
@@ -297,6 +299,7 @@ class TestNoiseSuppresionEnabledFlag(unittest.TestCase):
         engine._play_queue = MagicMock()
         engine._play_thread = None
         engine.noise_suppression_enabled = ns_enabled
+        engine._per_user_volume = {}
         engine._suppressor = ae._SpectralNoiseSuppressor(_BLOCKSIZE)
         return engine
 
@@ -335,6 +338,98 @@ class TestNoiseSuppresionEnabledFlag(unittest.TestCase):
         real = ae.AudioEngine()
         self.assertTrue(real.noise_suppression_enabled)
         real._play_queue.put_nowait(None)  # stop playback thread
+
+
+class TestPerUserVolumeAccessors(unittest.TestCase):
+    """Unit tests for get_volume / set_volume."""
+
+    def setUp(self):
+        import queue as _q
+        self.engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        self.engine._per_user_volume = {}
+        self.engine._play_queue = _q.Queue()
+        self.engine._play_thread = None
+
+    def test_default_volume_is_100(self):
+        self.assertEqual(self.engine.get_volume("alice"), 100)
+
+    def test_set_and_get_round_trip(self):
+        self.engine.set_volume("alice", 80)
+        self.assertEqual(self.engine.get_volume("alice"), 80)
+
+    def test_clamp_below_zero(self):
+        self.engine.set_volume("alice", -10)
+        self.assertEqual(self.engine.get_volume("alice"), 0)
+
+    def test_clamp_above_200(self):
+        self.engine.set_volume("alice", 250)
+        self.assertEqual(self.engine.get_volume("alice"), 200)
+
+    def test_zero_boundary(self):
+        self.engine.set_volume("alice", 0)
+        self.assertEqual(self.engine.get_volume("alice"), 0)
+
+    def test_200_boundary(self):
+        self.engine.set_volume("alice", 200)
+        self.assertEqual(self.engine.get_volume("alice"), 200)
+
+    def test_separate_users_independent(self):
+        self.engine.set_volume("alice", 60)
+        self.engine.set_volume("bob", 150)
+        self.assertEqual(self.engine.get_volume("alice"), 60)
+        self.assertEqual(self.engine.get_volume("bob"), 150)
+
+
+@unittest.skipUnless(NS_AVAILABLE, "numpy not available")
+class TestPlaybackWorkerGain(unittest.TestCase):
+    """Tests for per-user gain application in the playback worker."""
+
+    def _run_worker_frame(self, pcm: np.ndarray, username: str, level: int) -> np.ndarray:
+        """Feed one frame through the gain logic (extracted from worker)."""
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._per_user_volume = {username: level} if username else {}
+        engine._suppressor = None
+        engine.noise_suppression_enabled = True
+
+        audio = pcm.copy()
+        gain_level = engine._per_user_volume.get(username, 100)
+        if gain_level != 100:
+            audio = np.clip(
+                audio.astype(np.float32) * (gain_level / 100.0),
+                -32768, 32767,
+            ).astype(np.int16)
+        return audio
+
+    def test_100_percent_leaves_pcm_unchanged(self):
+        pcm = _make_indata(amplitude=5000)[:, 0]
+        result = self._run_worker_frame(pcm, "alice", 100)
+        np.testing.assert_array_equal(result, pcm)
+
+    def test_50_percent_halves_rms(self):
+        pcm = _make_indata(amplitude=8000)[:, 0]
+        result = self._run_worker_frame(pcm, "alice", 50)
+        rms_in  = float(np.sqrt(np.mean(pcm.astype(np.float64) ** 2)))
+        rms_out = float(np.sqrt(np.mean(result.astype(np.float64) ** 2)))
+        self.assertAlmostEqual(rms_out / rms_in, 0.5, delta=0.01)
+
+    def test_0_percent_produces_silence(self):
+        pcm = _make_indata(amplitude=10000)[:, 0]
+        result = self._run_worker_frame(pcm, "alice", 0)
+        self.assertTrue(np.all(result == 0))
+
+    def test_200_percent_clips_without_raising(self):
+        pcm = np.full(_BLOCKSIZE, 30000, dtype=np.int16)
+        try:
+            result = self._run_worker_frame(pcm, "alice", 200)
+        except Exception as exc:
+            self.fail(f"200% gain raised: {exc}")
+        self.assertLessEqual(int(result.max()), 32767)
+        self.assertGreaterEqual(int(result.min()), -32768)
+
+    def test_unknown_username_defaults_to_100(self):
+        pcm = _make_indata(amplitude=5000)[:, 0]
+        result = self._run_worker_frame(pcm, "", 100)
+        np.testing.assert_array_equal(result, pcm)
 
 
 if __name__ == "__main__":

@@ -406,7 +406,7 @@ class TraxusApp(App):
     def on_traxus_app_audio_frame(self, msg: "TraxusApp.AudioFrame") -> None:
         try:
             _channel, _username, codec, audio_bytes = voice_protocol.unpack_s2c(msg.data)
-            self._audio_engine.play(audio_bytes, codec)   # instant: queues to playback thread
+            self._audio_engine.play(audio_bytes, codec, _username)   # instant: queues to playback thread
         except Exception:
             pass
 

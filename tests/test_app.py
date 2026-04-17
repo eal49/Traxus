@@ -366,7 +366,7 @@ class TestAudioFrameDispatch(unittest.IsolatedAsyncioTestCase):
 
             played_chunks: list[tuple] = []
 
-            def fake_play(audio_bytes: bytes, codec: int = 0) -> None:
+            def fake_play(audio_bytes: bytes, codec: int = 0, username: str = "") -> None:
                 played_chunks.append((audio_bytes, codec))
 
             app._audio_engine.play = fake_play  # type: ignore[method-assign]
