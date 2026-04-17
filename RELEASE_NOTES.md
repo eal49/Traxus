@@ -1,17 +1,16 @@
 ## What's new
 
-- **Spectral noise suppression** — background noise is filtered from your microphone
-  signal before transmission using a spectral subtraction algorithm.
-- **Noise suppression toggle** — enable or disable noise suppression at runtime via
-  the settings menu (`/settings`). The preference is persisted to `settings.json`.
-- **Per-participant volume control** — adjust the playback volume of each voice
-  participant (0–200%) directly in the Members panel. Use arrow keys when the panel
-  is focused: ↑/↓ to select a participant, ←/→ to decrease/increase their volume by
-  10%. The bar updates in real time.
+- **Microphone test screen** — accessible via Settings > Test Microphone. Opens a
+  live mic monitor where you can hear yourself exactly as others do (loopback
+  playback through your speakers), see a rolling ASCII spectrogram showing the
+  frequency content of your voice over time, and watch a real-time RMS level bar.
+  Loopback is on by default and can be toggled with `L`. The NS status label shows
+  whether noise suppression is currently active, so you can hear the difference
+  by toggling it in settings without leaving the test screen.
 
 ## Bug fixes
 
-- Fixed missing error message when the initial server connection attempt fails.
+- None.
 
 ## Breaking changes
 
