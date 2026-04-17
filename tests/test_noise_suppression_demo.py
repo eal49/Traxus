@@ -20,10 +20,15 @@ import sys
 import unittest
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")          # non-interactive backend — safe in test runners
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")          # non-interactive backend — safe in test runners
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    _MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    _MATPLOTLIB_AVAILABLE = False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -94,6 +99,7 @@ def _make_warm_suppressor(warmup_frames: int = 40, noise_amp: int = 300):
 # ── test class ────────────────────────────────────────────────────────────────
 
 @unittest.skipUnless(NS_AVAILABLE, "numpy not available — demo requires numpy")
+@unittest.skipUnless(_MATPLOTLIB_AVAILABLE, "matplotlib not installed — run manually for demo")
 class TestNoiseSuppresionDemo(unittest.TestCase):
     """Generates a PNG figure demonstrating noise suppressor effectiveness."""
 
