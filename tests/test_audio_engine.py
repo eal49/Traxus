@@ -179,6 +179,8 @@ class TestInputCallbackNsActive(unittest.TestCase):
         engine._play_queue = MagicMock()
         engine._play_thread = None
 
+        engine.noise_suppression_enabled = True
+
         # Real suppressor, but spy on process()
         real_suppressor = ae._SpectralNoiseSuppressor(_BLOCKSIZE)
         engine._suppressor = real_suppressor
@@ -252,6 +254,7 @@ class TestInputCallbackNsInactive(unittest.TestCase):
         engine._play_queue = MagicMock()
         engine._play_thread = None
         engine._suppressor = None   # ← NS disabled
+        engine.noise_suppression_enabled = True
         return engine
 
     def test_raw_bytes_reach_queue_when_ns_inactive(self):
@@ -273,6 +276,65 @@ class TestInputCallbackNsInactive(unittest.TestCase):
             engine._input_callback(_make_indata(), _BLOCKSIZE, {}, None)
         except Exception as exc:
             self.fail(f"callback raised with NS inactive: {exc}")
+
+
+@unittest.skipUnless(NS_AVAILABLE, "numpy not available")
+class TestNoiseSuppresionEnabledFlag(unittest.TestCase):
+    """Tests for AudioEngine.noise_suppression_enabled flag behaviour."""
+
+    def _make_engine(self, ns_enabled: bool):
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._loop = MagicMock()
+        engine._stream = None
+        engine._queue = MagicMock()
+        engine._queue.put_nowait = MagicMock()
+        engine._transmitting = True
+        engine._vad_active = False
+        engine._vad_callback = None
+        engine._vad_voice_state = False
+        engine._energy_callback = None
+        engine._vad_threshold = 250.0
+        engine._play_queue = MagicMock()
+        engine._play_thread = None
+        engine.noise_suppression_enabled = ns_enabled
+        engine._suppressor = ae._SpectralNoiseSuppressor(_BLOCKSIZE)
+        return engine
+
+    def test_suppressor_not_called_when_flag_false(self):
+        """When noise_suppression_enabled is False, process() must never be called."""
+        engine = self._make_engine(ns_enabled=False)
+        with patch.object(engine._suppressor, "process") as mock_process:
+            engine._input_callback(_make_indata(), _BLOCKSIZE, {}, None)
+        mock_process.assert_not_called()
+
+    def test_suppressor_called_when_flag_true(self):
+        """When noise_suppression_enabled is True, process() must be called once."""
+        engine = self._make_engine(ns_enabled=True)
+        with patch.object(engine._suppressor, "process", wraps=engine._suppressor.process) as spy:
+            engine._input_callback(_make_indata(), _BLOCKSIZE, {}, None)
+        spy.assert_called_once()
+
+    def test_default_value_is_true(self):
+        """AudioEngine() should initialise noise_suppression_enabled to True."""
+        import queue as _queue
+        import threading as _threading
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._loop = None
+        engine._stream = None
+        engine._queue = ae.asyncio.Queue()
+        engine._transmitting = False
+        engine._suppressor = None
+        engine._vad_active = False
+        engine._vad_callback = None
+        engine._vad_voice_state = False
+        engine._energy_callback = None
+        engine._vad_threshold = 250.0
+        engine._play_queue = _queue.Queue()
+        engine._play_thread = None
+        # Call only the attribute-setting lines via real __init__ on a fresh instance
+        real = ae.AudioEngine()
+        self.assertTrue(real.noise_suppression_enabled)
+        real._play_queue.put_nowait(None)  # stop playback thread
 
 
 if __name__ == "__main__":

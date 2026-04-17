@@ -11,6 +11,8 @@ from textual.app import ComposeResult
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView
 
+from client.audio_engine import NS_AVAILABLE
+
 _PTT_MODE_CYCLE = ["toggle", "hold", "vad"]
 _PTT_MODE_LABELS = {"toggle": "Toggle", "hold": "Hold", "vad": "VAD"}
 
@@ -40,8 +42,17 @@ class SettingsScreen(ModalScreen[str | None]):
             "ptt_mode": getattr(app, "_ptt_mode", "toggle"),
             "vad_sensitivity": getattr(app, "_vad_sensitivity", "high"),
             "vad_custom_threshold": getattr(app, "_vad_custom_threshold", 50.0),
+            "noise_suppression": getattr(
+                getattr(app, "_audio_engine", None), "noise_suppression_enabled", True
+            ),
         })
         return settings
+
+    def _ns_label(self) -> str:
+        enabled = getattr(
+            getattr(self.app, "_audio_engine", None), "noise_suppression_enabled", True
+        )
+        return f"Noise Suppression: {'On' if enabled else 'Off'}"
 
     def _sens_label(self) -> str:
         sens = getattr(self.app, "_vad_sensitivity", "high")
@@ -59,14 +70,16 @@ class SettingsScreen(ModalScreen[str | None]):
             ListItem(Label("PTT Key"), id="item-ptt-key"),
             ListItem(Label(f"PTT Mode: {mode_label}"), id="item-ptt-mode"),
             ListItem(Label(self._sens_label()), id="item-vad-sensitivity"),
+            ListItem(Label(self._ns_label()), id="item-noise-suppression"),
             id="settings-list",
         )
 
     def on_mount(self) -> None:
         self._update_vad_sensitivity_visibility()
+        self._update_noise_suppression_visibility()
 
     def _rebuild_settings_list(self) -> None:
-        """Update labels in-place and show/hide VAD Sensitivity item."""
+        """Update labels in-place and show/hide conditional items."""
         current_mode = getattr(self.app, "_ptt_mode", "toggle")
         mode_label = _PTT_MODE_LABELS.get(current_mode, "Toggle")
         self.query_one("#item-ptt-mode", ListItem).query_one(Label).update(
@@ -75,11 +88,18 @@ class SettingsScreen(ModalScreen[str | None]):
         self.query_one("#item-vad-sensitivity", ListItem).query_one(Label).update(
             self._sens_label()
         )
+        self.query_one("#item-noise-suppression", ListItem).query_one(Label).update(
+            self._ns_label()
+        )
         self._update_vad_sensitivity_visibility()
+        self._update_noise_suppression_visibility()
 
     def _update_vad_sensitivity_visibility(self) -> None:
         current_mode = getattr(self.app, "_ptt_mode", "toggle")
         self.query_one("#item-vad-sensitivity", ListItem).display = (current_mode == "vad")
+
+    def _update_noise_suppression_visibility(self) -> None:
+        self.query_one("#item-noise-suppression", ListItem).display = NS_AVAILABLE
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item.id == "item-ptt-key":
@@ -89,6 +109,8 @@ class SettingsScreen(ModalScreen[str | None]):
             self._cycle_ptt_mode()
         elif event.item.id == "item-vad-sensitivity":
             self._cycle_vad_sensitivity()
+        elif event.item.id == "item-noise-suppression":
+            self._toggle_noise_suppression()
 
     def _on_ptt_key(self, new_key: str | None) -> None:
         """Callback from PttKeyScreen.  Forward the chosen key to the app."""
@@ -121,6 +143,15 @@ class SettingsScreen(ModalScreen[str | None]):
         else:
             self._restart_vad_if_active()
             self._rebuild_settings_list()
+
+    def _toggle_noise_suppression(self) -> None:
+        from client.settings import save_settings
+        engine = getattr(self.app, "_audio_engine", None)
+        if engine is None:
+            return
+        engine.noise_suppression_enabled = not engine.noise_suppression_enabled
+        save_settings(self._all_settings())
+        self._rebuild_settings_list()
 
     def _open_calibration(self) -> None:
         from client.screens.vad_calibration_screen import VadCalibrationScreen

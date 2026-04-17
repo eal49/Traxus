@@ -102,3 +102,31 @@ The selected PTT key SHALL be saved to `~/.config/traxus/settings.json` and rest
 #### Scenario: Default value is empty string
 - **WHEN** no previous connection has been made and settings are loaded
 - **THEN** both `last_server` and `last_username` SHALL default to `""`
+
+### Requirement: Settings modal includes a Noise Suppression toggle
+When `NS_AVAILABLE` is `True`, the settings modal SHALL display a "Noise Suppression" menu entry showing the current state (On / Off). Selecting it SHALL toggle the value and save it immediately. When `NS_AVAILABLE` is `False`, the entry SHALL be absent.
+
+#### Scenario: Noise Suppression entry present when NS available
+- **WHEN** `NS_AVAILABLE` is `True` and the settings modal opens
+- **THEN** the menu SHALL contain an entry labelled "Noise Suppression" showing the current state (On or Off)
+
+#### Scenario: Noise Suppression entry absent when NS unavailable
+- **WHEN** `NS_AVAILABLE` is `False` and the settings modal opens
+- **THEN** the menu SHALL NOT contain a "Noise Suppression" entry
+
+#### Scenario: Selecting Noise Suppression toggles the state
+- **WHEN** the user selects the "Noise Suppression" entry
+- **THEN** the state SHALL flip (On → Off or Off → On)
+- **THEN** `AudioEngine.noise_suppression_enabled` SHALL be updated to match the new state
+- **THEN** the new state SHALL be saved to `~/.config/traxus/settings.json`
+
+### Requirement: noise_suppression setting is persisted
+The `noise_suppression` boolean key in `~/.config/traxus/settings.json` SHALL be written when the user toggles the setting and read at startup to initialise `AudioEngine.noise_suppression_enabled`.
+
+#### Scenario: Setting survives restart
+- **WHEN** the user disables noise suppression and relaunches the client
+- **THEN** `AudioEngine.noise_suppression_enabled` SHALL be `False` on startup
+
+#### Scenario: Missing key uses default
+- **WHEN** `~/.config/traxus/settings.json` exists but does not contain `"noise_suppression"`
+- **THEN** `noise_suppression_enabled` SHALL default to `True`

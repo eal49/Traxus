@@ -90,6 +90,7 @@ class TraxusApp(App):
         self._ptt_mode: str = settings.get("ptt_mode", "toggle")
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
         self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
+        self._audio_engine.noise_suppression_enabled = bool(settings.get("noise_suppression", True))
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────

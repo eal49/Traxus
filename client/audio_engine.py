@@ -269,6 +269,7 @@ class AudioEngine:
         self._suppressor: _SpectralNoiseSuppressor | None = (
             _SpectralNoiseSuppressor(_BLOCKSIZE) if NS_AVAILABLE else None
         )
+        self.noise_suppression_enabled: bool = True
 
         # VAD state
         self._vad_active: bool = False
@@ -385,10 +386,10 @@ class AudioEngine:
         # noise model stays warm and is ready the moment PTT is pressed.
         # indata has shape (frame_size, 1) from sounddevice; squeeze to (frame_size,).
         # Cost: ~0.3 ms per frame at 50 fps ≈ 1.5 % CPU — acceptable.
-        if self._suppressor is not None and self._loop is not None:
+        if self._suppressor is not None and self._loop is not None and self.noise_suppression_enabled:
             pcm_filtered = self._suppressor.process(indata[:, 0])
         else:
-            pcm_filtered = None   # NS unavailable; fall back to raw bytes below
+            pcm_filtered = None   # NS unavailable or disabled; fall back to raw bytes below
 
         if self._transmitting and self._loop is not None:
             if pcm_filtered is not None:
