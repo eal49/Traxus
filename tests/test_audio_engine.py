@@ -18,8 +18,20 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import asyncio
+
 import client.audio_engine as ae
 from client.audio_engine import NS_AVAILABLE, _BLOCKSIZE
+from shared import voice_protocol
+
+
+def _unpack_c2s(frame: bytes) -> tuple[str, int, bytes]:
+    """Minimal C2S frame unpacker for tests."""
+    n = frame[0]
+    channel = frame[1:1 + n].decode()
+    codec = frame[1 + n]
+    audio_bytes = frame[2 + n:]
+    return channel, codec, audio_bytes
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -164,12 +176,14 @@ class TestInputCallbackNsActive(unittest.TestCase):
 
     def _make_engine_with_mock_suppressor(self):
         """Return an AudioEngine whose _suppressor.process is a mock."""
+        import queue as _q
         engine = ae.AudioEngine.__new__(ae.AudioEngine)
         # Minimal manual init (avoids opening real audio streams)
         engine._loop = MagicMock()
+        engine._loop.call_soon_threadsafe.side_effect = lambda fn, *args: fn(*args)
         engine._stream = None
-        engine._queue = MagicMock()
-        engine._queue.put_nowait = MagicMock()
+        engine._send_queue = _q.Queue()
+        engine._send_channel = "test"
         engine._transmitting = True
         engine._vad_active = False
         engine._vad_callback = None
@@ -230,9 +244,8 @@ class TestInputCallbackNsActive(unittest.TestCase):
                 indata = _make_indata()
                 engine._input_callback(indata, _BLOCKSIZE, {}, None)
 
-        engine._loop.call_soon_threadsafe.assert_called_once()
-        _, queued_pair = engine._loop.call_soon_threadsafe.call_args[0]
-        codec, audio_bytes = queued_pair
+        packed = engine._send_queue.get_nowait()
+        _ch, _codec, audio_bytes = _unpack_c2s(packed)
         # The bytes should be the sentinel array's bytes
         self.assertEqual(audio_bytes, sentinel.tobytes())
 
@@ -243,11 +256,13 @@ class TestInputCallbackNsInactive(unittest.TestCase):
     exactly as before — no filtering, no change in behaviour."""
 
     def _make_engine_no_ns(self):
+        import queue as _q
         engine = ae.AudioEngine.__new__(ae.AudioEngine)
         engine._loop = MagicMock()
+        engine._loop.call_soon_threadsafe.side_effect = lambda fn, *args: fn(*args)
         engine._stream = None
-        engine._queue = MagicMock()
-        engine._queue.put_nowait = MagicMock()
+        engine._send_queue = _q.Queue()
+        engine._send_channel = "test"
         engine._transmitting = True
         engine._vad_active = False
         engine._vad_callback = None
@@ -270,9 +285,8 @@ class TestInputCallbackNsInactive(unittest.TestCase):
             indata = _make_indata()
             engine._input_callback(indata, _BLOCKSIZE, {}, None)
 
-        engine._loop.call_soon_threadsafe.assert_called_once()
-        _, queued_pair = engine._loop.call_soon_threadsafe.call_args[0]
-        codec, audio_bytes = queued_pair
+        packed = engine._send_queue.get_nowait()
+        _ch, _codec, audio_bytes = _unpack_c2s(packed)
         self.assertEqual(audio_bytes, indata.tobytes())
 
     def test_callback_does_not_crash_when_ns_inactive(self):
@@ -289,11 +303,12 @@ class TestNoiseSuppresionEnabledFlag(unittest.TestCase):
     """Tests for AudioEngine.noise_suppression_enabled flag behaviour."""
 
     def _make_engine(self, ns_enabled: bool):
+        import queue as _q
         engine = ae.AudioEngine.__new__(ae.AudioEngine)
         engine._loop = MagicMock()
         engine._stream = None
-        engine._queue = MagicMock()
-        engine._queue.put_nowait = MagicMock()
+        engine._send_queue = _q.Queue()
+        engine._send_channel = "test"
         engine._transmitting = True
         engine._vad_active = False
         engine._vad_callback = None
@@ -662,41 +677,11 @@ class TestJitterBufferFrames(unittest.TestCase):
     """AudioEngine stores jitter_buffer_frames from constructor argument."""
 
     def test_default_jitter_buffer_frames_is_3_in_constructor(self):
-        import queue as _q
-        engine = ae.AudioEngine.__new__(ae.AudioEngine)
-        engine._loop = None
-        engine._stream = None
-        engine._queue = ae.asyncio.Queue()
-        engine._transmitting = False
-        engine._suppressor = None
-        engine._vad_active = False
-        engine._vad_callback = None
-        engine._vad_voice_state = False
-        engine._energy_callback = None
-        engine._spectrum_callback = None
-        engine._vad_threshold = 250.0
-        engine._play_queue = _q.Queue()
-        engine._play_thread = None
         real = ae.AudioEngine()
         self.assertEqual(real._jitter_buffer_frames, 3)
         real._play_queue.put_nowait(None)
 
     def test_custom_jitter_buffer_frames_stored(self):
-        engine = ae.AudioEngine.__new__(ae.AudioEngine)
-        engine._loop = None
-        engine._stream = None
-        engine._queue = ae.asyncio.Queue()
-        engine._transmitting = False
-        engine._suppressor = None
-        engine._vad_active = False
-        engine._vad_callback = None
-        engine._vad_voice_state = False
-        engine._energy_callback = None
-        engine._spectrum_callback = None
-        engine._vad_threshold = 250.0
-        import queue as _q
-        engine._play_queue = _q.Queue()
-        engine._play_thread = None
         real = ae.AudioEngine(jitter_buffer_frames=5)
         self.assertEqual(real._jitter_buffer_frames, 5)
         real._play_queue.put_nowait(None)
@@ -705,6 +690,112 @@ class TestJitterBufferFrames(unittest.TestCase):
         real = ae.AudioEngine(jitter_buffer_frames=0)
         self.assertEqual(real._jitter_buffer_frames, 1)
         real._play_queue.put_nowait(None)
+
+
+class TestSetSendTarget(unittest.TestCase):
+    """set_send_target stores and clears the send queue and channel."""
+
+    def _make_engine(self):
+        import queue as _q
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._send_queue = None
+        engine._send_channel = ""
+        engine._play_queue = _q.Queue()
+        engine._play_thread = None
+        engine._per_user_volume = {}
+        return engine
+
+    def test_set_send_target_stores_queue_and_channel(self):
+        import queue as _q
+        engine = self._make_engine()
+        q = _q.Queue()
+        engine.set_send_target(q, "lobby")
+        self.assertIs(engine._send_queue, q)
+        self.assertEqual(engine._send_channel, "lobby")
+
+    def test_set_send_target_none_clears(self):
+        import queue as _q
+        engine = self._make_engine()
+        engine.set_send_target(_q.Queue(), "lobby")
+        engine.set_send_target(None, "")
+        self.assertIsNone(engine._send_queue)
+        self.assertEqual(engine._send_channel, "")
+
+    def test_set_send_target_overwrites_previous(self):
+        import queue as _q
+        engine = self._make_engine()
+        q1 = _q.Queue()
+        q2 = _q.Queue()
+        engine.set_send_target(q1, "chan1")
+        engine.set_send_target(q2, "chan2")
+        self.assertIs(engine._send_queue, q2)
+        self.assertEqual(engine._send_channel, "chan2")
+
+
+@unittest.skipUnless(NS_AVAILABLE, "numpy not available")
+class TestInputCallbackSendTarget(unittest.TestCase):
+    """_input_callback sends packed frame to _send_queue when target is set."""
+
+    def _make_engine(self, send_queue=None, channel="test", transmitting=True):
+        import queue as _q
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._loop = MagicMock()
+        engine._loop.call_soon_threadsafe.side_effect = lambda fn, *args: fn(*args)
+        engine._stream = None
+        engine._send_queue = send_queue if send_queue is not None else _q.Queue()
+        engine._send_channel = channel
+        engine._transmitting = transmitting
+        engine._vad_active = False
+        engine._vad_callback = None
+        engine._vad_voice_state = False
+        engine._energy_callback = None
+        engine._spectrum_callback = None
+        engine._vad_threshold = 250.0
+        engine._play_queue = _q.Queue()
+        engine._play_thread = None
+        engine._suppressor = None
+        engine.noise_suppression_enabled = False
+        engine.loopback_enabled = False
+        engine._per_user_volume = {}
+        return engine
+
+    def test_packed_frame_posted_when_transmitting_and_target_set(self):
+        import queue as _q
+        send_q = _q.Queue()
+        engine = self._make_engine(send_queue=send_q, channel="lobby")
+
+        with patch("client.audio_engine.ADPCM_AVAILABLE", False):
+            indata = _make_indata()
+            engine._input_callback(indata, _BLOCKSIZE, {}, None)
+
+        self.assertFalse(send_q.empty(), "Expected a packed frame in send queue")
+        packed = send_q.get_nowait()
+        ch, codec, audio_bytes = _unpack_c2s(packed)
+        self.assertEqual(ch, "lobby")
+        self.assertEqual(codec, ae.CODEC_RAW)
+        self.assertEqual(audio_bytes, indata.tobytes())
+
+    def test_nothing_posted_when_send_target_is_none(self):
+        import queue as _q
+        engine = self._make_engine()
+        engine._send_queue = None  # no target
+
+        engine._input_callback(_make_indata(), _BLOCKSIZE, {}, None)
+
+        # call_soon_threadsafe must not have been called for send
+        for call in engine._loop.call_soon_threadsafe.call_args_list:
+            fn = call[0][0]
+            self.assertIsNot(fn, None.__class__.put_nowait,
+                             "put_nowait called with None queue")
+
+    def test_nothing_posted_when_not_transmitting(self):
+        import queue as _q
+        send_q = _q.Queue()
+        engine = self._make_engine(send_queue=send_q, transmitting=False)
+
+        engine._input_callback(_make_indata(), _BLOCKSIZE, {}, None)
+
+        self.assertTrue(send_q.empty(), "No frame should be posted when not transmitting")
 
 
 if __name__ == "__main__":

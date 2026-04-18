@@ -25,7 +25,6 @@ from client.screens.login_screen import LoginScreen
 from client.widgets.input_bar import InputBar
 from client.widgets.message_view import MessageView, _strip_markup
 from client.ws_worker import WsWorker
-from shared import voice_protocol
 from shared.message_types import C2S, S2C
 
 if TYPE_CHECKING:
@@ -71,16 +70,10 @@ class TraxusApp(App):
             self.state  = state
             self.detail = detail
 
-    class AudioFrame(Message):
-        def __init__(self, data: bytes) -> None:
-            super().__init__()
-            self.data = data
-
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def on_mount(self) -> None:
         self._ws_worker: WsWorker | None = None
-        self._capture_worker = None
         self._ptt_debounce_task: asyncio.Task | None = None
         self._vad_hangover_task: asyncio.Task | None = None
         self._channel_members: dict[str, list[dict]] = {}
@@ -103,7 +96,7 @@ class TraxusApp(App):
 
     def connect_to_server(self, server_url: str, username: str) -> None:
         self.username = username
-        self._ws_worker = WsWorker(self)
+        self._ws_worker = WsWorker(self, audio_engine=self._audio_engine)
         self.run_worker(
             self._ws_worker.run(server_url, username),
             exclusive=True,
@@ -332,25 +325,21 @@ class TraxusApp(App):
             chat.update_ptt(True)
         loop = asyncio.get_running_loop()
         self._audio_engine.start(loop)
-        self._capture_worker = self.run_worker(
-            self._audio_engine.capture_loop(
+        if self._ws_worker is not None:
+            self._audio_engine.set_send_target(
+                self._ws_worker._binary_send_queue,
                 self.current_voice_channel,
-                self._send_voice_frame,
-            ),
-            name="ptt_capture",
-        )
+            )
 
     def stop_ptt(self) -> None:
         if not self._audio_engine.transmitting:
             return
         self._cancel_ptt_debounce()
         self._audio_engine.transmitting = False
+        self._audio_engine.set_send_target(None, "")
         # In VAD mode the stream stays open (managed by _exit_vad_listening).
         if self._ptt_mode != "vad":
             self._audio_engine.stop()
-        if self._capture_worker is not None:
-            self._capture_worker.cancel()
-            self._capture_worker = None
         chat = self._chat()
         if chat:
             chat.update_ptt(False)
@@ -436,19 +425,7 @@ class TraxusApp(App):
         elif not should_listen and is_listening:
             self._exit_vad_listening()
 
-    async def _send_voice_frame(self, channel: str, audio_bytes: bytes, codec: int = 0) -> None:
-        if self._ws_worker:
-            from shared import voice_protocol as vp
-            self._ws_worker.enqueue_binary(vp.pack_c2s(channel, audio_bytes, codec))
-
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
-
-    def on_traxus_app_audio_frame(self, msg: "TraxusApp.AudioFrame") -> None:
-        try:
-            _channel, _username, codec, audio_bytes = voice_protocol.unpack_s2c(msg.data)
-            self._audio_engine.play(audio_bytes, codec, _username)   # instant: queues to playback thread
-        except Exception:
-            pass
 
     def on_traxus_app_server_message(self, msg: "TraxusApp.ServerMessage") -> None:
         payload = msg.payload

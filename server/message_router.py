@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -426,13 +427,15 @@ class MessageRouter:
             frame[1 + n:]
         )
 
-        for vc in self._conn.voice_clients_in_channel(channel):
-            if vc.ws is ws:
-                continue
-            try:
-                await vc.ws.send(s2c_frame)
-            except Exception:
-                pass
+        receivers = [
+            vc for vc in self._conn.voice_clients_in_channel(channel)
+            if vc.ws is not ws
+        ]
+        if receivers:
+            await asyncio.gather(
+                *[vc.ws.send(s2c_frame) for vc in receivers],
+                return_exceptions=True,
+            )
 
     # ── Disconnect cleanup ────────────────────────────────────────────────────
 

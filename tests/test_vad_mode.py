@@ -40,9 +40,7 @@ async def _setup_voice(app, pilot):
     app._audio_engine.start = MagicMock()
     app._audio_engine.stop = MagicMock()
     app._audio_engine.stop_vad = MagicMock()
-    async def _noop_capture(channel, send_fn):
-        return
-    app._audio_engine.capture_loop = _noop_capture
+    app._audio_engine.set_send_target = MagicMock()
 
 
 # ── AudioEngine unit tests ─────────────────────────────────────────────────────

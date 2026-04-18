@@ -52,11 +52,7 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
         app = TraxusApp()
 
         # Prevent sounddevice from opening a real microphone stream.
-        # capture_loop is replaced with a no-op so the worker exits immediately.
         app_start_mock = MagicMock()
-
-        async def _noop_capture(channel, send_fn):
-            return
 
         async with app.run_test(size=(120, 40)) as pilot:
 
@@ -92,7 +88,7 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
 
                 # ── 3. Join voice channel ─────────────────────────────────────
                 app._audio_engine.start = app_start_mock
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
                 # Ensure toggle mode regardless of system settings file.
                 app._ptt_mode = "toggle"
 

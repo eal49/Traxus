@@ -34,6 +34,7 @@ except ImportError:
 
 if AUDIO_AVAILABLE:
     from shared.adpcm import CODEC_ADPCM, CODEC_RAW, decode as _adpcm_decode, encode as _adpcm_encode
+    from shared import voice_protocol
     ADPCM_AVAILABLE = True
 else:
     CODEC_RAW    = 0  # type: ignore[assignment]
@@ -264,8 +265,10 @@ class AudioEngine:
     def __init__(self, jitter_buffer_frames: int = 3) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream = None
-        self._queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()   # (codec, audio) capture frames
         self._transmitting: bool = False
+        # Send target: set by set_send_target() before PTT, cleared after.
+        self._send_queue: asyncio.Queue | None = None
+        self._send_channel: str = ""
         self._jitter_buffer_frames: int = max(1, jitter_buffer_frames)
 
         # Spectral noise suppressor (None when NS_AVAILABLE is False)
@@ -357,6 +360,12 @@ class AudioEngine:
         self._spectrum_callback = None
         self.stop()
 
+    def set_send_target(self, binary_send_queue, channel: str) -> None:
+        """Register where the capture callback should post packed audio frames.
+        Call with (None, "") to stop posting (e.g. on PTT stop or voice leave)."""
+        self._send_queue = binary_send_queue
+        self._send_channel = channel
+
     def set_energy_callback(self, cb) -> None:
         """Register a callback fired with the raw RMS float on every audio frame."""
         self._energy_callback = cb
@@ -436,25 +445,15 @@ class AudioEngine:
         if self._spectrum_callback is not None and self._loop is not None:
             self._loop.call_soon_threadsafe(self._spectrum_callback, pcm_bytes)
 
-        if self._transmitting and self._loop is not None:
+        if self._transmitting and self._loop is not None and self._send_queue is not None:
             if ADPCM_AVAILABLE:
                 audio_bytes = _adpcm_encode(pcm_bytes)
                 codec = CODEC_ADPCM
             else:
                 audio_bytes = pcm_bytes
                 codec = CODEC_RAW
-            self._loop.call_soon_threadsafe(
-                self._queue.put_nowait, (codec, audio_bytes)
-            )
-
-    async def capture_loop(self, channel: str, send_fn) -> None:
-        """Drain the capture queue and send each frame via send_fn."""
-        while self._transmitting:
-            try:
-                codec, audio_bytes = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                continue
-            await send_fn(channel, audio_bytes, codec)
+            packed = voice_protocol.pack_c2s(self._send_channel, audio_bytes, codec)
+            self._loop.call_soon_threadsafe(self._send_queue.put_nowait, packed)
 
     # ── Playback ──────────────────────────────────────────────────────────────
 

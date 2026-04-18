@@ -774,6 +774,38 @@ class TestRelayVoice(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ws_non.binary), 0, "Non-member must not receive frame")
 
 
+    async def test_relay_sends_to_all_even_when_one_raises(self):
+        """relay_voice must deliver to remaining receivers if one send() raises."""
+        class BinaryMockWs:
+            def __init__(self, fail: bool = False):
+                self.binary: list[bytes] = []
+                self.fail = fail
+            async def send(self, data):
+                if self.fail:
+                    raise ConnectionError("simulated send failure")
+                if isinstance(data, bytes):
+                    self.binary.append(data)
+
+        ws_s   = BinaryMockWs()
+        ws_ok  = BinaryMockWs(fail=False)
+        ws_bad = BinaryMockWs(fail=True)
+
+        sender  = self.conn.register(ws_s,   "sender_f")
+        healthy = self.conn.register(ws_ok,  "healthy_f")
+        broken  = self.conn.register(ws_bad, "broken_f")
+
+        sender.voice_channels.add("lounge")
+        healthy.voice_channels.add("lounge")
+        broken.voice_channels.add("lounge")
+
+        frame = self._make_frame("lounge", b"\x01\x02")
+        # Must not raise even though one receiver raises
+        await self.router.relay_voice(frame, ws_s, sender)
+
+        self.assertGreater(len(ws_ok.binary), 0,
+                           "Healthy receiver must still get the frame")
+
+
 # ── msg_id in chat messages ───────────────────────────────────────────────────
 
 class TestMsgId(unittest.IsolatedAsyncioTestCase):

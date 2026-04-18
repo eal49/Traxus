@@ -49,9 +49,7 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 app.on_mouse_down(_mouse_event(3))
                 await pilot.pause()
@@ -94,9 +92,7 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()

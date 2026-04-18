@@ -1,21 +1,22 @@
 ## What's new
 
-- **Audio jitter buffer** — eliminates voice playback stutter caused by variable
-  network inter-packet delay. The playback worker now pre-fills a 100 ms buffer
-  (5 frames) before draining at a steady 20 ms clock, so timing variance on the
-  wire is absorbed rather than replayed as audible choppiness.
-  - Overflow handling switched from drop-oldest to drop-newest, removing the
-    waveform discontinuities (clicks/pops) that occurred during bursts.
-  - Output stream opened with `latency="low"` to prevent OS-default
-    over-buffering on Windows.
-  - Underrun timeout raised to 300 ms, preventing false re-prime cycles from
-    normal network jitter.
-  - Buffer depth is configurable: set `jitter_buffer_frames` in
-    `~/.config/traxus/settings.json` (default `5`; reduce to `1` on a LAN).
+- **Direct audio pipeline** — bypasses the Textual message pump for all audio
+  frames, eliminating 0–50 ms of variable latency per received frame. Incoming
+  voice frames are now decoded and queued directly in the WebSocket recv loop
+  instead of going through Textual's event bus.
+- **Single-hop send path** — microphone capture posts directly to the WebSocket
+  binary queue via `call_soon_threadsafe`, removing three asyncio context
+  switches from the transmit path.
+- **Concurrent server relay** — the server now relays voice frames to all
+  receivers in parallel (`asyncio.gather`) instead of sequentially, so one slow
+  client cannot delay audio delivery to others.
+- **LAN latency** — median end-to-end pipeline latency measured at ~3–4 ms
+  under loopback/LAN conditions (new `test_audio_pipeline_latency.py`).
 
 ## Bug fixes
 
-- None.
+- Fixed missing `asyncio` import in `server/message_router.py` that caused a
+  `NameError` crash when the concurrent relay was first invoked.
 
 ## Breaking changes
 

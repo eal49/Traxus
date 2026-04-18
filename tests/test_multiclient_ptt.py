@@ -114,9 +114,6 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
         play_durations: list[float] = []
         received_messages: list[str] = []
 
-        async def _noop_capture(channel, send_fn):
-            return
-
         app = TraxusApp()
         async with app.run_test(size=(120, 40)) as pilot:
 
@@ -147,7 +144,7 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
 
                 # ── 2. Create + join voice channel ────────────────────────────
                 app._audio_engine.start = MagicMock()
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 # Instrument play() to verify it returns instantly.
                 real_play = app._audio_engine.play
@@ -241,9 +238,6 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
         FRAME_COUNT = 30
         TEXT_TIMEOUT = 3.0  # seconds to wait for the chat message
 
-        async def _noop_capture(channel, send_fn):
-            return
-
         app = TraxusApp()
         received_messages: list[str] = []
 
@@ -273,7 +267,7 @@ class TestMultiClientPtt(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 app.handle_input("/vcreate lounge2")
                 await pilot.pause(0.5)

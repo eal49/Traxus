@@ -21,9 +21,11 @@ import websockets.asyncio.client
 import websockets.exceptions
 
 from shared.message_types import C2S, VERSION
+from shared import voice_protocol
 
 if TYPE_CHECKING:
     from client.app import TraxusApp
+    from client.audio_engine import AudioEngine
 
 log = logging.getLogger("traxus.worker")
 
@@ -40,8 +42,9 @@ class WsWorker:
     so websockets and Textual share the same event loop naturally.
     """
 
-    def __init__(self, app: "TraxusApp") -> None:
+    def __init__(self, app: "TraxusApp", audio_engine: "AudioEngine | None" = None) -> None:
         self._app = app
+        self._audio_engine = audio_engine
         self._ws: websockets.asyncio.client.ClientConnection | None = None
         self._send_queue: asyncio.Queue[str] = asyncio.Queue()
         self._binary_send_queue: asyncio.Queue[bytes] = asyncio.Queue()
@@ -127,7 +130,12 @@ class WsWorker:
     ) -> None:
         async for raw in ws:
             if isinstance(raw, bytes):
-                self._post_audio_frame(raw)
+                if self._audio_engine is not None:
+                    try:
+                        _ch, _user, codec, audio_bytes = voice_protocol.unpack_s2c(raw)
+                        self._audio_engine.play(audio_bytes, codec, _user)
+                    except Exception:
+                        pass
                 continue
             try:
                 payload = json.loads(raw)
@@ -177,10 +185,6 @@ class WsWorker:
     def _post_server_message(self, payload: dict) -> None:
         from client.app import TraxusApp
         self._app.post_message(TraxusApp.ServerMessage(payload))
-
-    def _post_audio_frame(self, data: bytes) -> None:
-        from client.app import TraxusApp
-        self._app.post_message(TraxusApp.AudioFrame(data))
 
     def _post_state(self, state: str, detail: str = "") -> None:
         from client.app import TraxusApp

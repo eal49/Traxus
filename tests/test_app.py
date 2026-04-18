@@ -347,55 +347,6 @@ class TestCommandDispatch(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, LoginScreen)
 
 
-# ── AudioFrame dispatch ───────────────────────────────────────────────────────
-
-class TestAudioFrameDispatch(unittest.IsolatedAsyncioTestCase):
-    """
-    AudioFrame messages should dispatch to audio_engine.play() via
-    on_traxus_app_audio_frame. We mock AudioEngine to verify the call.
-    """
-
-    async def test_audio_frame_dispatches_to_play(self):
-        from unittest.mock import MagicMock, patch
-        from shared import voice_protocol
-
-        app = TraxusApp()
-        async with app.run_test() as pilot:
-            await app.switch_screen(ChatScreen())
-            await pilot.pause()
-
-            played_chunks: list[tuple] = []
-
-            def fake_play(audio_bytes: bytes, codec: int = 0, username: str = "") -> None:
-                played_chunks.append((audio_bytes, codec))
-
-            app._audio_engine.play = fake_play  # type: ignore[method-assign]
-
-            # Build a valid S2C frame (with codec byte = CODEC_RAW = 0)
-            audio = b"\x01\x02\x03\x04"
-            ch = b"lounge"
-            un = b"alice"
-            frame = bytes([len(ch)]) + ch + bytes([len(un)]) + un + bytes([0]) + audio
-
-            app.post_message(TraxusApp.AudioFrame(frame))
-            await pilot.pause()
-
-            self.assertEqual(len(played_chunks), 1)
-            self.assertEqual(played_chunks[0][0], audio)
-            self.assertEqual(played_chunks[0][1], 0)
-
-    async def test_malformed_audio_frame_does_not_crash(self):
-        app = TraxusApp()
-        async with app.run_test() as pilot:
-            await app.switch_screen(ChatScreen())
-            await pilot.pause()
-
-            app.post_message(TraxusApp.AudioFrame(b"\xff"))  # malformed
-            await pilot.pause()
-            # Should not crash — still on ChatScreen
-            self.assertIsInstance(app.screen, ChatScreen)
-
-
 # ── PTT key binding ───────────────────────────────────────────────────────────
 
 class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
@@ -426,10 +377,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                # capture_loop must exit immediately so the worker doesn't hang
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()
@@ -453,9 +401,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
                 app._audio_engine.start = MagicMock()
                 app._audio_engine.stop = MagicMock()
 
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()
@@ -476,9 +422,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()
@@ -534,9 +478,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
             with patch("client.app.AUDIO_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                async def _noop_capture(channel, send_fn):
-                    return
-                app._audio_engine.capture_loop = _noop_capture
+                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()
