@@ -146,12 +146,12 @@ class TestNoiseSuppressionSetting(unittest.TestCase):
 
 
 class TestJitterBufferFramesSetting(unittest.TestCase):
-    def test_default_is_3_when_key_absent(self):
+    def test_default_is_5_when_key_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_path = Path(tmpdir) / "nonexistent" / "settings.json"
             with patch.object(settings_module, "_SETTINGS_FILE", fake_path):
                 result = settings_module.load_settings()
-        self.assertEqual(result["jitter_buffer_frames"], 3)
+        self.assertEqual(result["jitter_buffer_frames"], 5)
 
     def test_custom_value_round_trips(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -522,7 +522,7 @@ class AudioEngine:
 
                     while True:
                         try:
-                            item = self._play_queue.get(timeout=_FRAME_SECONDS * 2)
+                            item = self._play_queue.get(timeout=_FRAME_SECONDS * 15)
                         except queue.Empty:
                             # Underrun — go back to pre-fill gate
                             break

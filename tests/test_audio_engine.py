@@ -661,7 +661,7 @@ class TestPlayDropNewest(unittest.TestCase):
 class TestJitterBufferFrames(unittest.TestCase):
     """AudioEngine stores jitter_buffer_frames from constructor argument."""
 
-    def test_default_jitter_buffer_frames_is_3(self):
+    def test_default_jitter_buffer_frames_is_3_in_constructor(self):
         import queue as _q
         engine = ae.AudioEngine.__new__(ae.AudioEngine)
         engine._loop = None
