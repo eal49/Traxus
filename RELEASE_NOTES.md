@@ -1,16 +1,14 @@
 ## What's new
 
-- **Microphone test screen** — accessible via Settings > Test Microphone. Opens a
-  live mic monitor where you can hear yourself exactly as others do (loopback
-  playback through your speakers), see a rolling ASCII spectrogram showing the
-  frequency content of your voice over time, and watch a real-time RMS level bar.
-  Loopback is on by default and can be toggled with `L`. The NS status label shows
-  whether noise suppression is currently active, so you can hear the difference
-  by toggling it in settings without leaving the test screen.
+- **Line wrapping** — chat messages now wrap to the message area width instead
+  of overflowing horizontally. Wrapping re-renders automatically when the
+  terminal window is resized.
 
 ## Bug fixes
 
-- None.
+- **`/vleave` command fixed** — leaving a voice channel now correctly clears
+  the voice channel indicator in the status bar. Active PTT or VAD audio
+  capture is also stopped automatically when you leave.
 
 ## Breaking changes
 
