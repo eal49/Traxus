@@ -58,6 +58,49 @@ The server SHALL relay binary audio frames from a transmitting client to all oth
 
 ---
 
+### Requirement: Server notifies the leaving client of voice_state on vleave
+When a client sends `C2S voice_leave`, the server SHALL send a `S2C voice_state`
+message to the leaving client (in addition to the remaining channel members).
+The `users` field SHALL contain only the members still in the channel after the
+leave (i.e., it SHALL NOT include the leaving client).
+
+#### Scenario: Leaving client receives voice_state
+- **WHEN** a client sends `C2S voice_leave { channel: "lounge" }`
+- **THEN** the server SHALL send `S2C voice_state { channel: "lounge", users: [...] }` to that client
+- **THEN** the `users` list SHALL NOT contain the leaving client's username
+
+#### Scenario: Remaining members also receive voice_state
+- **WHEN** a client sends `C2S voice_leave { channel: "lounge" }`
+- **THEN** all other clients still in `#lounge` voice SHALL also receive `S2C voice_state`
+
+---
+
+### Requirement: Client clears current_voice_channel on voice_state with empty users
+When the client receives `S2C voice_state` for its current voice channel and the
+`users` list does not contain the local user (or is empty), it SHALL clear
+`current_voice_channel` to `""`.
+
+#### Scenario: current_voice_channel clears after vleave
+- **WHEN** the client sends `/vleave` and receives `S2C voice_state { users: [] }`
+- **THEN** `current_voice_channel` SHALL be `""`
+- **THEN** the status bar SHALL no longer show a voice-channel indicator
+
+---
+
+### Requirement: Active PTT or VAD stops automatically when leaving a voice channel
+If the client is transmitting (PTT active) or listening (VAD mode) when
+`current_voice_channel` is cleared, audio capture SHALL stop immediately.
+
+#### Scenario: PTT stops on vleave
+- **WHEN** PTT is active and the client sends `/vleave`
+- **THEN** after the `voice_state` response clears `current_voice_channel`, PTT SHALL be stopped
+
+#### Scenario: VAD listening stops on vleave
+- **WHEN** VAD mode is active and the client sends `/vleave`
+- **THEN** after `current_voice_channel` is cleared, `_exit_vad_listening` SHALL be called
+
+---
+
 ### Requirement: voice_join error on non-voice channel
 If a client sends `C2S voice_join` targeting a text channel or a non-existent channel, the server SHALL respond with `S2C error { code: "not_a_voice_channel" }` or `S2C error { code: "no_such_channel" }` respectively.
 
