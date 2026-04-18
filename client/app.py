@@ -80,7 +80,6 @@ class TraxusApp(App):
 
     def on_mount(self) -> None:
         self._ws_worker: WsWorker | None = None
-        self._audio_engine: AudioEngine = AudioEngine()
         self._capture_worker = None
         self._ptt_debounce_task: asyncio.Task | None = None
         self._vad_hangover_task: asyncio.Task | None = None
@@ -89,6 +88,9 @@ class TraxusApp(App):
         self._selection_command: str | None = None
         from client.settings import load_settings
         settings = load_settings()
+        self._audio_engine: AudioEngine = AudioEngine(
+            jitter_buffer_frames=int(settings.get("jitter_buffer_frames", 3))
+        )
         self._ptt_key: str = settings.get("ptt_key", "f9")
         self._ptt_mode: str = settings.get("ptt_mode", "toggle")
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")

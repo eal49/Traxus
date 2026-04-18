@@ -24,6 +24,7 @@ _DEFAULTS: dict = {
     "last_server": "",
     "last_username": "",
     "nick_color": "",
+    "jitter_buffer_frames": 3,
 }
 
 

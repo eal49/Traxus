@@ -620,5 +620,92 @@ class TestAudioEngineSpectrumCallback(unittest.TestCase):
         engine._loop = None
 
 
+class TestPlayDropNewest(unittest.TestCase):
+    """play() must silently discard incoming frames when the queue is full."""
+
+    def _make_engine(self):
+        import queue as _q
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._play_queue = _q.Queue(maxsize=2)
+        engine._play_thread = None
+        engine._per_user_volume = {}
+        return engine
+
+    def test_play_does_not_raise_when_full(self):
+        engine = self._make_engine()
+        # Fill the queue
+        engine._play_queue.put_nowait((ae.CODEC_RAW, b"\x00" * 4, ""))
+        engine._play_queue.put_nowait((ae.CODEC_RAW, b"\x01" * 4, ""))
+        # This should silently drop, not raise
+        try:
+            engine.play(b"\x02" * 4, ae.CODEC_RAW, "alice")
+        except Exception as exc:
+            self.fail(f"play() raised on full queue: {exc}")
+
+    def test_play_drops_incoming_not_buffered(self):
+        engine = self._make_engine()
+        old1 = (ae.CODEC_RAW, b"\xAA" * 4, "")
+        old2 = (ae.CODEC_RAW, b"\xBB" * 4, "")
+        engine._play_queue.put_nowait(old1)
+        engine._play_queue.put_nowait(old2)
+        # Try to enqueue a new frame when full
+        engine.play(b"\xCC" * 4, ae.CODEC_RAW, "")
+        # Queue should still contain the original two items
+        self.assertEqual(engine._play_queue.qsize(), 2)
+        got1 = engine._play_queue.get_nowait()
+        got2 = engine._play_queue.get_nowait()
+        self.assertEqual(got1, old1)
+        self.assertEqual(got2, old2)
+
+
+class TestJitterBufferFrames(unittest.TestCase):
+    """AudioEngine stores jitter_buffer_frames from constructor argument."""
+
+    def test_default_jitter_buffer_frames_is_3(self):
+        import queue as _q
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._loop = None
+        engine._stream = None
+        engine._queue = ae.asyncio.Queue()
+        engine._transmitting = False
+        engine._suppressor = None
+        engine._vad_active = False
+        engine._vad_callback = None
+        engine._vad_voice_state = False
+        engine._energy_callback = None
+        engine._spectrum_callback = None
+        engine._vad_threshold = 250.0
+        engine._play_queue = _q.Queue()
+        engine._play_thread = None
+        real = ae.AudioEngine()
+        self.assertEqual(real._jitter_buffer_frames, 3)
+        real._play_queue.put_nowait(None)
+
+    def test_custom_jitter_buffer_frames_stored(self):
+        engine = ae.AudioEngine.__new__(ae.AudioEngine)
+        engine._loop = None
+        engine._stream = None
+        engine._queue = ae.asyncio.Queue()
+        engine._transmitting = False
+        engine._suppressor = None
+        engine._vad_active = False
+        engine._vad_callback = None
+        engine._vad_voice_state = False
+        engine._energy_callback = None
+        engine._spectrum_callback = None
+        engine._vad_threshold = 250.0
+        import queue as _q
+        engine._play_queue = _q.Queue()
+        engine._play_thread = None
+        real = ae.AudioEngine(jitter_buffer_frames=5)
+        self.assertEqual(real._jitter_buffer_frames, 5)
+        real._play_queue.put_nowait(None)
+
+    def test_jitter_buffer_frames_minimum_is_1(self):
+        real = ae.AudioEngine(jitter_buffer_frames=0)
+        self.assertEqual(real._jitter_buffer_frames, 1)
+        real._play_queue.put_nowait(None)
+
+
 if __name__ == "__main__":
     unittest.main()

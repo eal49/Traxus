@@ -19,6 +19,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 
 log = logging.getLogger("traxus.audio")
 
@@ -253,17 +254,19 @@ _SAMPLERATE = 16_000
 _CHANNELS   = 1
 _DTYPE      = "int16"
 _BLOCKSIZE  = 320          # samples per capture callback
-_PLAY_QUEUE_MAX = 10       # drop old frames rather than buffer unboundedly
+_PLAY_QUEUE_MAX = 10       # max queued frames before drop-newest kicks in
+_FRAME_SECONDS  = _BLOCKSIZE / _SAMPLERATE   # 0.02 s = 20 ms per frame
 
 
 class AudioEngine:
     """Manages microphone capture and speaker playback via sounddevice."""
 
-    def __init__(self) -> None:
+    def __init__(self, jitter_buffer_frames: int = 3) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream = None
         self._queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()   # (codec, audio) capture frames
         self._transmitting: bool = False
+        self._jitter_buffer_frames: int = max(1, jitter_buffer_frames)
 
         # Spectral noise suppressor (None when NS_AVAILABLE is False)
         self._suppressor: _SpectralNoiseSuppressor | None = (
@@ -467,44 +470,69 @@ class AudioEngine:
         try:
             self._play_queue.put_nowait((codec, audio_bytes, username))
         except queue.Full:
-            # Playback thread is behind; drop the oldest frame and enqueue new.
-            try:
-                self._play_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._play_queue.put_nowait((codec, audio_bytes, username))
-            except queue.Full:
-                pass  # give up if still full
+            pass  # drop-newest: discard incoming frame, keep buffered audio intact
+
+    def _decode_frame(self, codec: int, audio_bytes: bytes, username: str):
+        """Decode one queued frame and apply per-user gain. Returns int16 ndarray."""
+        if ADPCM_AVAILABLE and codec == CODEC_ADPCM:
+            pcm_bytes = _adpcm_decode(audio_bytes)
+        else:
+            pcm_bytes = audio_bytes
+        audio = np.frombuffer(pcm_bytes, dtype=np.int16)
+        level = self._per_user_volume.get(username, 100)
+        if level != 100:
+            audio = np.clip(
+                audio.astype(np.float32) * (level / 100.0),
+                -32768, 32767,
+            ).astype(np.int16)
+        return audio
 
     def _playback_worker(self) -> None:
         """
-        Background thread: owns a single continuous OutputStream and writes
-        PCM frames to it as they arrive.  One stream, no per-frame stop/start.
-        ADPCM decode happens here so play() never blocks the Textual pump.
+        Background thread: owns a single continuous OutputStream.
+
+        Jitter buffer: accumulate _jitter_buffer_frames frames before starting
+        playback, then drain at a fixed 20 ms clock.  On underrun, return to
+        the pre-fill gate.  This absorbs variable network inter-packet delay
+        without playing back the timing variance as audible stutter.
         """
         try:
             with sd.OutputStream(
                 samplerate=_SAMPLERATE,
                 channels=_CHANNELS,
                 dtype=_DTYPE,
+                latency="low",
             ) as out_stream:
                 while True:
-                    item = self._play_queue.get()
-                    if item is None:             # sentinel → shut down
-                        break
-                    codec, audio_bytes, username = item
-                    if ADPCM_AVAILABLE and codec == CODEC_ADPCM:
-                        pcm_bytes = _adpcm_decode(audio_bytes)
-                    else:
-                        pcm_bytes = audio_bytes
-                    audio = np.frombuffer(pcm_bytes, dtype=np.int16)
-                    level = self._per_user_volume.get(username, 100)
-                    if level != 100:
-                        audio = np.clip(
-                            audio.astype(np.float32) * (level / 100.0),
-                            -32768, 32767,
-                        ).astype(np.int16)
-                    out_stream.write(audio)
+                    # ── Pre-fill gate ────────────────────────────────────────
+                    # Block until _jitter_buffer_frames frames are ready.
+                    prefill: list = []
+                    while len(prefill) < self._jitter_buffer_frames:
+                        item = self._play_queue.get()
+                        if item is None:          # sentinel → shut down
+                            return
+                        prefill.append(item)
+
+                    # ── Drain loop at fixed 20 ms clock ─────────────────────
+                    next_tick = time.perf_counter()
+                    for item in prefill:
+                        codec, audio_bytes, username = item
+                        out_stream.write(self._decode_frame(codec, audio_bytes, username))
+                        next_tick += _FRAME_SECONDS
+
+                    while True:
+                        try:
+                            item = self._play_queue.get(timeout=_FRAME_SECONDS * 2)
+                        except queue.Empty:
+                            # Underrun — go back to pre-fill gate
+                            break
+                        if item is None:          # sentinel → shut down
+                            return
+                        codec, audio_bytes, username = item
+                        sleep_for = next_tick - time.perf_counter()
+                        if sleep_for > 0:
+                            time.sleep(sleep_for)
+                        out_stream.write(self._decode_frame(codec, audio_bytes, username))
+                        next_tick += _FRAME_SECONDS
         except Exception:
             log.exception("Playback worker crashed")
