@@ -48,12 +48,20 @@ The client SHALL play received audio frames from the server using sounddevice. E
 
 ---
 
-### Requirement: Asyncio-safe callback bridging
-The sounddevice callback thread SHALL communicate with the asyncio event loop via `loop.call_soon_threadsafe()`. The `AudioEngine.start()` method SHALL capture the running loop reference. The `AudioEngine.stop()` method SHALL clear the loop reference before the capture stream is closed.
+### Requirement: AudioEngine exposes set_send_target for direct frame posting
+`AudioEngine` SHALL expose a `set_send_target(binary_send_queue, channel: str)` method. When set, the sounddevice capture callback SHALL encode, pack, and post frames directly to `binary_send_queue` via `loop.call_soon_threadsafe`. When cleared (`None`, `""`), the callback SHALL not post any frames.
 
-#### Scenario: Callback enqueues safely
-- **WHEN** a PCM block arrives in the sounddevice callback thread during PTT
-- **THEN** it is posted to the asyncio queue via `call_soon_threadsafe` without raising a RuntimeError
+#### Scenario: set_send_target registers queue and channel
+- **WHEN** `set_send_target(queue, "lounge")` is called
+- **THEN** `AudioEngine._send_queue` and `AudioEngine._send_channel` SHALL be set accordingly
+
+#### Scenario: set_send_target with None clears target
+- **WHEN** `set_send_target(None, "")` is called
+- **THEN** the capture callback SHALL not post frames to any queue
+
+#### Scenario: Capture callback posts directly during PTT
+- **WHEN** PTT is active and a send target is configured
+- **THEN** each captured frame SHALL be ADPCM-encoded, packed via `voice_protocol.pack_c2s`, and posted to `_send_queue` in a single `call_soon_threadsafe` call
 
 ---
 
