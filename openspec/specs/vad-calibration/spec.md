@@ -41,14 +41,14 @@ The calibration screen SHALL allow the user to move the threshold up and down us
 - **THEN** the threshold SHALL remain at 1 and not decrease further
 
 ### Requirement: Calibration result is saved on confirmation
-Pressing Enter on the calibration screen SHALL save the current threshold as `vad_custom_threshold` in settings and dismiss the screen.
+Pressing Enter on the calibration screen SHALL save the current threshold as `vad_custom_threshold` in settings and dismiss the screen. The `VadCalibrationScreen` is no longer opened from the normal settings sensitivity flow; it is superseded by `VadSensitivityScreen` for that use case.
 
 #### Scenario: Enter saves threshold
 - **WHEN** the calibration screen is open and the user presses Enter
 - **THEN** the current threshold value SHALL be saved to `~/.config/traxus/settings.json` as `vad_custom_threshold`
-- **THEN** the screen SHALL dismiss and the settings menu SHALL be restored
+- **THEN** the screen SHALL dismiss and the previous screen SHALL be restored
 
 #### Scenario: Escape discards threshold change
 - **WHEN** the calibration screen is open and the user presses Escape
 - **THEN** the previously saved `vad_custom_threshold` SHALL remain unchanged
-- **THEN** the screen SHALL dismiss and the settings menu SHALL be restored
+- **THEN** the screen SHALL dismiss and the previous screen SHALL be restored

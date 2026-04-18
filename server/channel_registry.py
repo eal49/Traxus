@@ -29,6 +29,7 @@ class ChannelRegistry:
 
     def __init__(self) -> None:
         self._channels: dict[str, Channel] = {}
+        self._pins: dict[str, dict] = {}
         self._bootstrap_defaults()
 
     def _bootstrap_defaults(self) -> None:
@@ -70,6 +71,12 @@ class ChannelRegistry:
         ch = self._channels.get(name)
         if ch:
             ch.history.append(message)
+
+    def set_pin(self, channel: str, payload: dict) -> None:
+        self._pins[channel] = payload
+
+    def get_pin(self, channel: str) -> dict | None:
+        return self._pins.get(channel)
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 

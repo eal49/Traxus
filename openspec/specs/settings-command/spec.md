@@ -32,19 +32,15 @@ The settings modal SHALL present a list of setting categories that the user can 
 
 #### Scenario: VAD Sensitivity item appears only in VAD mode
 - **WHEN** PTT mode is `"vad"` and the settings modal opens
-- **THEN** the menu SHALL contain an entry labelled "VAD Sensitivity" showing the current level (Low / Medium / High / Very High / Custom)
+- **THEN** the menu SHALL contain an entry labelled "VAD Threshold" showing the current threshold value as an integer
 
 #### Scenario: VAD Sensitivity item absent in non-VAD modes
 - **WHEN** PTT mode is `"toggle"` or `"hold"` and the settings modal opens
-- **THEN** the menu SHALL NOT contain a "VAD Sensitivity" entry
+- **THEN** the menu SHALL NOT contain a "VAD Threshold" entry
 
-#### Scenario: Selecting VAD Sensitivity cycles the level
-- **WHEN** the user selects "VAD Sensitivity" from the settings menu and the current level is not "Custom"
-- **THEN** the level SHALL cycle Low → Medium → High → Very High → Custom → Low and the change SHALL be saved immediately
-
-#### Scenario: Selecting Custom VAD Sensitivity opens calibration screen
-- **WHEN** the user selects "VAD Sensitivity" and the current level is "Custom"
-- **THEN** the `VadCalibrationScreen` SHALL open as a modal over the settings screen
+#### Scenario: Selecting VAD Sensitivity opens VadSensitivityScreen
+- **WHEN** the user selects "VAD Threshold" from the settings menu
+- **THEN** `VadSensitivityScreen` SHALL open as a modal over the settings screen
 
 #### Scenario: Selecting PTT Key opens key capture screen
 - **WHEN** the user selects "PTT Key" from the settings menu
@@ -147,3 +143,18 @@ visible when `AUDIO_AVAILABLE` is `True`, and hidden when it is `False`.
 #### Scenario: Selecting Test Microphone opens MicTestScreen
 - **WHEN** the user selects "Test Microphone" from the settings menu
 - **THEN** `MicTestScreen` SHALL be pushed onto the screen stack as a modal
+
+### Requirement: Settings modal contains a Nick Color entry
+The settings modal SHALL include a "Nick Color" list item showing the current color (hex or "default"). Selecting it SHALL open `ColorPickerScreen`.
+
+#### Scenario: Nick Color entry is present
+- **WHEN** the settings modal opens
+- **THEN** the menu SHALL contain an entry labelled "Nick Color" showing the current hex value or "default" if none is set
+
+#### Scenario: Selecting Nick Color opens ColorPickerScreen
+- **WHEN** the user selects "Nick Color" from the settings menu
+- **THEN** `ColorPickerScreen` SHALL be pushed as a modal over the settings screen
+
+#### Scenario: Color updates after picker closes
+- **WHEN** the user confirms a color in `ColorPickerScreen` and returns to the settings screen
+- **THEN** the "Nick Color" entry SHALL display the newly chosen hex value

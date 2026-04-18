@@ -123,6 +123,42 @@ class TestParseInput(unittest.TestCase):
         for cmd in ("join", "nick", "quit", "help"):
             self.assertIn(cmd, HELP_TEXT)
 
+    def test_color_in_known_commands(self):
+        self.assertIn("color", KNOWN_COMMANDS)
+
+    def test_color_in_help_text(self):
+        self.assertIn("color", HELP_TEXT)
+
+    def test_color_blue_parsed(self):
+        cmd = parse_input("/color blue")
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd.name, "color")
+        self.assertEqual(cmd.args, ["blue"])
+
+    def test_color_hex_parsed(self):
+        cmd = parse_input("/color #ff5500")
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd.name, "color")
+        self.assertEqual(cmd.args, ["#ff5500"])
+
+    def test_color_reset_parsed(self):
+        cmd = parse_input("/color reset")
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd.name, "color")
+        self.assertEqual(cmd.args, ["reset"])
+
+    def test_quote_in_known_commands(self):
+        self.assertIn("quote", KNOWN_COMMANDS)
+
+    def test_pin_in_known_commands(self):
+        self.assertIn("pin", KNOWN_COMMANDS)
+
+    def test_quote_in_help_text(self):
+        self.assertIn("quote", HELP_TEXT)
+
+    def test_pin_in_help_text(self):
+        self.assertIn("pin", HELP_TEXT)
+
 
 if __name__ == "__main__":
     unittest.main()

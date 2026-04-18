@@ -184,5 +184,34 @@ class TestChannelSummary(unittest.TestCase):
         self.assertEqual(summary["member_count"], 7)
 
 
+class TestChannelRegistryPin(unittest.TestCase):
+
+    def setUp(self):
+        self.cr = ChannelRegistry()
+
+    def test_get_pin_returns_none_when_no_pin_set(self):
+        self.assertIsNone(self.cr.get_pin("general"))
+
+    def test_set_pin_stores_payload(self):
+        payload = {"msg_id": "abc", "username": "alice", "content": "hello"}
+        self.cr.set_pin("general", payload)
+        self.assertEqual(self.cr.get_pin("general"), payload)
+
+    def test_set_pin_replaces_existing_pin(self):
+        self.cr.set_pin("general", {"msg_id": "old"})
+        new_payload = {"msg_id": "new", "username": "bob", "content": "world"}
+        self.cr.set_pin("general", new_payload)
+        self.assertEqual(self.cr.get_pin("general")["msg_id"], "new")
+
+    def test_pin_per_channel_independent(self):
+        self.cr.set_pin("general", {"msg_id": "g1"})
+        self.cr.set_pin("random", {"msg_id": "r1"})
+        self.assertEqual(self.cr.get_pin("general")["msg_id"], "g1")
+        self.assertEqual(self.cr.get_pin("random")["msg_id"], "r1")
+
+    def test_get_pin_for_unknown_channel_returns_none(self):
+        self.assertIsNone(self.cr.get_pin("nonexistent"))
+
+
 if __name__ == "__main__":
     unittest.main()

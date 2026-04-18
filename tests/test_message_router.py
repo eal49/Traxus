@@ -774,5 +774,149 @@ class TestRelayVoice(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ws_non.binary), 0, "Non-member must not receive frame")
 
 
+# ── msg_id in chat messages ───────────────────────────────────────────────────
+
+class TestMsgId(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+
+    async def test_chat_message_has_msg_id(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        self.ws.clear()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.MESSAGE, "channel": "general", "content": "hello",
+            }),
+            self.ws, client,
+        )
+        chat = self.ws.first_of_type(S2C.CHAT)
+        self.assertIsNotNone(chat)
+        self.assertIn("msg_id", chat)
+        self.assertIsInstance(chat["msg_id"], str)
+        self.assertGreater(len(chat["msg_id"]), 0)
+
+    async def test_msg_ids_are_unique_per_message(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        self.ws.clear()
+        for content in ("msg one", "msg two"):
+            await self.router.dispatch(
+                json.dumps({
+                    "type": C2S.MESSAGE, "channel": "general", "content": content,
+                }),
+                self.ws, client,
+            )
+        chats = self.ws.of_type(S2C.CHAT)
+        self.assertEqual(len(chats), 2)
+        self.assertNotEqual(chats[0]["msg_id"], chats[1]["msg_id"])
+
+    async def test_msg_id_stored_in_history(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        self.ws.clear()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.MESSAGE, "channel": "general", "content": "hi",
+            }),
+            self.ws, client,
+        )
+        history = self.chan.get_history("general")
+        self.assertGreater(len(history), 0)
+        self.assertIn("msg_id", history[-1])
+
+
+# ── pin_message handler ───────────────────────────────────────────────────────
+
+class TestPinMessage(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws = MockWs()
+
+    async def _send_chat_and_get_msg_id(self, client, channel="general", content="pinnable"):
+        await self.router.dispatch(
+            json.dumps({"type": C2S.MESSAGE, "channel": channel, "content": content}),
+            self.ws, client,
+        )
+        chat = self.ws.of_type(S2C.CHAT)[-1]
+        return chat["msg_id"], chat
+
+    async def test_pin_message_broadcasts_pin_added(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        msg_id, chat = await self._send_chat_and_get_msg_id(client)
+        self.ws.clear()
+
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.PIN_MESSAGE,
+                "channel": "general",
+                "msg_id": msg_id,
+                "username": chat["username"],
+                "content": chat["content"],
+            }),
+            self.ws, client,
+        )
+        pin = self.ws.first_of_type(S2C.PIN_ADDED)
+        self.assertIsNotNone(pin)
+        self.assertEqual(pin["msg_id"], msg_id)
+        self.assertEqual(pin["channel"], "general")
+
+    async def test_pin_stored_in_channel_registry(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        msg_id, chat = await self._send_chat_and_get_msg_id(client)
+
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.PIN_MESSAGE,
+                "channel": "general",
+                "msg_id": msg_id,
+                "username": chat["username"],
+                "content": chat["content"],
+            }),
+            self.ws, client,
+        )
+        pin = self.chan.get_pin("general")
+        self.assertIsNotNone(pin)
+        self.assertEqual(pin["msg_id"], msg_id)
+
+    async def test_pin_with_empty_msg_id_ignored(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        self.ws.clear()
+
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.PIN_MESSAGE,
+                "channel": "general",
+                "msg_id": "",
+                "content": "whatever",
+            }),
+            self.ws, client,
+        )
+        self.assertIsNone(self.ws.first_of_type(S2C.PIN_ADDED))
+
+    async def test_pin_included_in_join_response_after_pin(self):
+        client = await do_auth(self.router, self.conn, self.ws)
+        msg_id, chat = await self._send_chat_and_get_msg_id(client)
+
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.PIN_MESSAGE,
+                "channel": "general",
+                "msg_id": msg_id,
+                "username": chat["username"],
+                "content": chat["content"],
+            }),
+            self.ws, client,
+        )
+
+        # A second client joins — should receive pin in the joined payload
+        ws2 = MockWs()
+        await do_auth(self.router, self.conn, ws2, username="bob")
+        joined = ws2.first_of_type(S2C.JOINED)
+        self.assertIsNotNone(joined)
+        self.assertIn("pin", joined)
+        self.assertEqual(joined["pin"]["msg_id"], msg_id)
+
+
 if __name__ == "__main__":
     unittest.main()

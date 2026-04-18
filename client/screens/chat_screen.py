@@ -3,7 +3,7 @@ from __future__ import annotations
 from textual import events
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.widgets import Header
+from textual.widgets import Header, Static
 
 from client.widgets.channel_sidebar import ChannelSidebar
 from client.widgets.input_bar import InputBar
@@ -16,7 +16,15 @@ from textual.containers import Horizontal, Vertical
 class ChatScreen(Screen):
     """Main 3-panel chat layout."""
 
-    DEFAULT_CSS = ""
+    DEFAULT_CSS = """
+    #pin-header {
+        background: $boost;
+        color: $text;
+        padding: 0 1;
+        height: 1;
+        display: none;
+    }
+    """
     BINDINGS = []
 
     def compose(self) -> ComposeResult:
@@ -24,6 +32,7 @@ class ChatScreen(Screen):
         with Horizontal():
             yield ChannelSidebar(id="sidebar")
             with Vertical(id="main-panel"):
+                yield Static("", id="pin-header")
                 yield MessageView(id="messages", wrap=True, markup=True)
                 yield InputBar(id="input-area")
             yield MemberPanel(id="members")
@@ -72,7 +81,8 @@ class ChatScreen(Screen):
     def append_chat(self, payload: dict) -> None:
         mv = self._mv()
         if mv:
-            mv.add_chat(payload, self_username=self.app.username)  # type: ignore[attr-defined]
+            mv.add_chat(payload, self_username=self.app.username,  # type: ignore[attr-defined]
+                        self_color=getattr(self.app, "_nick_color", ""))
 
     def append_system(self, content: str) -> None:
         mv = self._mv()
@@ -133,12 +143,28 @@ class ChatScreen(Screen):
         else:
             self.append_system("Voice channel: no members")
 
+    def update_pin(self, pin: dict | None) -> None:
+        try:
+            header = self.query_one("#pin-header", Static)
+            if pin:
+                nick = pin.get("username", "?")
+                content = pin.get("content", "")
+                header.update(f"📌 @{nick}: {content}")
+                header.display = True
+            else:
+                header.display = False
+        except Exception:
+            pass
+
     def action_ptt_toggle(self) -> None:
         self.app.toggle_ptt()  # type: ignore[attr-defined]
 
     def load_history(self, history: list[dict]) -> None:
         mv = self.query_one("#messages", MessageView)
         mv.clear()
+        mv._lines = []
+        mv._payloads = []
         username = self.app.username  # type: ignore[attr-defined]
+        nick_color = getattr(self.app, "_nick_color", "")
         for msg in history:
-            mv.add_chat(msg, self_username=username)
+            mv.add_chat(msg, self_username=username, self_color=nick_color)

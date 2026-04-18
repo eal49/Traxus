@@ -100,3 +100,14 @@ The client SHALL support a `/who` command that displays the current channel's me
 #### Scenario: docs/commands.md documents /who
 - **WHEN** a developer opens `docs/commands.md`
 - **THEN** they SHALL find an entry for `/who` with syntax, description (client-only, no server message), and behavior
+
+### Requirement: /color command documented
+`docs/commands.md` and `/help` output SHALL document the `/color` command.
+
+#### Scenario: /help includes /color
+- **WHEN** the user types `/help`
+- **THEN** the output SHALL include a line for `/color` describing it as setting the user's nick color by name or hex value, with `/color reset` to revert
+
+#### Scenario: docs/commands.md documents /color
+- **WHEN** a developer opens `docs/commands.md`
+- **THEN** they SHALL find an entry for `/color` with syntax, argument table (name-or-hex, optional), predefined color names, and behavior notes

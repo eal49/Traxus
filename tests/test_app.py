@@ -751,5 +751,122 @@ class TestVleaveClientBehaviour(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(len(stop_calls) > 0, "stop_ptt was not called when channel cleared")
 
 
+# ── nick color ───────────────────────────────────────────────────────────────
+
+class TestNickColor(unittest.IsolatedAsyncioTestCase):
+    async def test_set_nick_color_updates_attribute(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        app = TraxusApp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test():
+                    app._set_nick_color("#ff5500")
+                    self.assertEqual(app._nick_color, "#ff5500")
+
+    async def test_set_nick_color_persists_to_settings(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        app = TraxusApp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test():
+                    app._set_nick_color("#abcdef")
+                data = json.loads(f.read_text(encoding="utf-8"))
+        self.assertEqual(data["nick_color"], "#abcdef")
+
+    async def test_add_chat_uses_self_color(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            app.username = "alice"
+            app._nick_color = "#ff0000"
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+            mv.add_chat(
+                {"username": "alice", "content": "hi", "ts": 0.0},
+                self_username="alice",
+                self_color="#ff0000",
+            )
+            self.assertGreater(_line_count(mv), before)
+            last_line = mv._lines[-1]
+            self.assertIn("#ff0000", last_line)
+
+    async def test_color_command_sets_nick_color(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        app = TraxusApp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test() as pilot:
+                    await app.switch_screen(ChatScreen())
+                    await pilot.pause()
+                    app.handle_input("/color blue")
+                    await pilot.pause()
+                    self.assertEqual(app._nick_color, "#5865f2")
+
+    async def test_color_command_reset_clears_nick_color(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        app = TraxusApp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test() as pilot:
+                    await app.switch_screen(ChatScreen())
+                    await pilot.pause()
+                    app._nick_color = "#ff0000"
+                    app.handle_input("/color reset")
+                    await pilot.pause()
+                    self.assertEqual(app._nick_color, "")
+
+    async def test_color_command_bad_hex_writes_error(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        app = TraxusApp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test() as pilot:
+                    await app.switch_screen(ChatScreen())
+                    await pilot.pause()
+                    mv = app.screen.query_one("#messages", MessageView)
+                    before = _line_count(mv)
+                    app.handle_input("/color #gg0000")
+                    await pilot.pause()
+                    self.assertGreater(_line_count(mv), before)
+                    self.assertEqual(app._nick_color, "")  # unchanged
+
+
 if __name__ == "__main__":
     unittest.main()

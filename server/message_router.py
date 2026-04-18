@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
 from shared import voice_protocol
@@ -41,6 +42,7 @@ class MessageRouter:
             C2S.PING:          self._handle_ping,
             C2S.VOICE_JOIN:    self._handle_voice_join,
             C2S.VOICE_LEAVE:   self._handle_voice_leave,
+            C2S.PIN_MESSAGE:   self._handle_pin_message,
         }
 
     # ── Entry point ───────────────────────────────────────────────────────────
@@ -150,11 +152,15 @@ class MessageRouter:
         client.channels.add(channel)
 
         history = self._chan.get_history(channel)
-        await self._send(ws, {
+        join_payload: dict = {
             "type": S2C.JOINED,
             "channel": channel,
             "history": history,
-        })
+        }
+        pin = self._chan.get_pin(channel)
+        if pin:
+            join_payload["pin"] = pin
+        await self._send(ws, join_payload)
 
         # Build updated member list (includes the newly joined client)
         members = [
@@ -231,6 +237,7 @@ class MessageRouter:
             "username": client.username,
             "content": content,
             "ts": time.time(),
+            "msg_id": str(uuid4()),
         }
         self._chan.add_to_history(channel, msg)
         await self._conn.broadcast_to_channel(channel, msg)
@@ -365,6 +372,40 @@ class MessageRouter:
         # Notify the leaving client so it can clear its local voice-channel state.
         await self._conn.send_to(client.user_id, voice_state)
         log.info("VLEAVE user=%s channel=#%s", client.username, channel)
+        return client
+
+    async def _handle_pin_message(self, payload, ws, client):
+        channel = str(payload.get("channel", "")).strip().lstrip("#")
+        msg_id = str(payload.get("msg_id", "")).strip()
+
+        if not self._chan.exists(channel):
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NO_SUCH_CHANNEL,
+                "message": f"Channel #{channel} does not exist.",
+            })
+            return client
+
+        if channel not in client.channels:
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NOT_AUTHENTICATED,
+                "message": "You are not a member of that channel.",
+            })
+            return client
+
+        if not msg_id:
+            return client
+
+        content = str(payload.get("content", ""))
+        pin_payload = {
+            "type": S2C.PIN_ADDED,
+            "channel": channel,
+            "msg_id": msg_id,
+            "username": str(payload.get("username", client.username)),
+            "content": content,
+        }
+        self._chan.set_pin(channel, pin_payload)
+        await self._conn.broadcast_to_channel(channel, pin_payload)
+        log.info("PIN   #%s msg_id=%s by %s", channel, msg_id, client.username)
         return client
 
     async def relay_voice(self, frame: bytes, ws: object, client: "ConnectedClient") -> None:

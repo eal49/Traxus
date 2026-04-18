@@ -42,11 +42,14 @@ HELP_TEXT = """\
   F9 (default)        Toggle push-to-talk (mic) — key or mouse button, change via /settings
   /who                List members in the current channel
   /settings           Open the settings menu (configure PTT key, etc.)
+  /color <name|#hex>  Set your nick color (blue/green/red/… or #rrggbb); "reset" to clear
+  /quote              Quote a message line (type "/quote " to enter selection mode)
+  /pin                Pin a message to the top of the channel (type "/pin " to select)
   /help               Show this help
   /quit               Disconnect and exit\
 """
 
 KNOWN_COMMANDS = {
     "join", "leave", "nick", "channels", "create", "who", "help", "quit",
-    "vcreate", "vjoin", "vleave", "settings",
+    "vcreate", "vjoin", "vleave", "settings", "color", "quote", "pin",
 }

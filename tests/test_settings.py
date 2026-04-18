@@ -78,6 +78,35 @@ class TestSaveSettings(unittest.TestCase):
             self.assertTrue(f.exists())
 
 
+class TestNickColorSetting(unittest.TestCase):
+    def test_nick_color_default_is_empty_string(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_path = Path(tmpdir) / "nonexistent" / "settings.json"
+            with patch.object(settings_module, "_SETTINGS_FILE", fake_path):
+                result = settings_module.load_settings()
+        self.assertEqual(result["nick_color"], "")
+
+    def test_nick_color_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                settings_module.save_settings({"nick_color": "#ff5500"})
+                result = settings_module.load_settings()
+        self.assertEqual(result["nick_color"], "#ff5500")
+
+    def test_nick_color_empty_string_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                settings_module.save_settings({"nick_color": ""})
+                result = settings_module.load_settings()
+        self.assertEqual(result["nick_color"], "")
+
+
 class TestNoiseSuppressionSetting(unittest.TestCase):
     def test_default_is_true_when_key_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,6 +143,22 @@ class TestNoiseSuppressionSetting(unittest.TestCase):
                 settings_module.save_settings({"noise_suppression": True})
                 result = settings_module.load_settings()
         self.assertTrue(result["noise_suppression"])
+
+
+class TestVadSensitivityScreenEntryPoint(unittest.TestCase):
+    def test_settings_screen_has_open_vad_sensitivity_screen(self):
+        from client.screens.settings_screen import SettingsScreen
+        self.assertTrue(
+            hasattr(SettingsScreen, "_open_vad_sensitivity_screen"),
+            "_open_vad_sensitivity_screen must exist on SettingsScreen",
+        )
+
+    def test_settings_screen_does_not_have_cycle_vad_sensitivity(self):
+        from client.screens.settings_screen import SettingsScreen
+        self.assertFalse(
+            hasattr(SettingsScreen, "_cycle_vad_sensitivity"),
+            "_cycle_vad_sensitivity must be removed from SettingsScreen",
+        )
 
 
 if __name__ == "__main__":

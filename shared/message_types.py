@@ -20,6 +20,8 @@ class C2S:
     PING          = "ping"
     VOICE_JOIN    = "voice_join"
     VOICE_LEAVE   = "voice_leave"
+    PIN_MESSAGE   = "pin_message"
+    UNPIN_MESSAGE = "unpin_message"
 
 
 # ── Server → Client ──────────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ class S2C:
     ERROR           = "error"
     PONG            = "pong"
     VOICE_STATE     = "voice_state"
+    PIN_ADDED       = "pin_added"
 
 
 # ── Auth error reasons ────────────────────────────────────────────────────────

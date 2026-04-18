@@ -23,6 +23,7 @@ _DEFAULTS: dict = {
     "noise_suppression": True,
     "last_server": "",
     "last_username": "",
+    "nick_color": "",
 }
 
 

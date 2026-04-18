@@ -22,6 +22,8 @@ from textual.reactive import reactive
 from client.audio_engine import AUDIO_AVAILABLE, AudioEngine
 from client.commands import HELP_TEXT, ParsedCommand, parse_input
 from client.screens.login_screen import LoginScreen
+from client.widgets.input_bar import InputBar
+from client.widgets.message_view import MessageView, _strip_markup
 from client.ws_worker import WsWorker
 from shared import voice_protocol
 from shared.message_types import C2S, S2C
@@ -84,6 +86,7 @@ class TraxusApp(App):
         self._vad_hangover_task: asyncio.Task | None = None
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
+        self._selection_command: str | None = None
         from client.settings import load_settings
         settings = load_settings()
         self._ptt_key: str = settings.get("ptt_key", "f9")
@@ -91,6 +94,7 @@ class TraxusApp(App):
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
         self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
         self._audio_engine.noise_suppression_enabled = bool(settings.get("noise_suppression", True))
+        self._nick_color: str = settings.get("nick_color", "")
         self.push_screen(LoginScreen())
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
@@ -223,6 +227,37 @@ class TraxusApp(App):
 
                 self.push_screen(SettingsScreen(), _on_settings_result)
 
+            case "color":
+                import re
+                _COLOR_NAMES = {
+                    "blue": "#5865f2", "green": "#57f287", "yellow": "#fee75c",
+                    "pink": "#eb459e", "red": "#ed4245", "cyan": "#00b0f4",
+                    "magenta": "#f47fff", "orange": "#faa61a", "white": "#ffffff",
+                }
+                if not cmd.args:
+                    self._local("/color <name|#rrggbb|reset>")
+                else:
+                    arg = cmd.args[0].lower()
+                    if arg == "reset":
+                        self._set_nick_color("")
+                        self._local("Nick color reset to default.")
+                    elif arg in _COLOR_NAMES:
+                        self._set_nick_color(_COLOR_NAMES[arg])
+                        self._local(f"Nick color set to {arg} ({_COLOR_NAMES[arg]}).")
+                    elif re.fullmatch(r"#[0-9a-fA-F]{6}", cmd.args[0]):
+                        self._set_nick_color(cmd.args[0])
+                        self._local(f"Nick color set to {cmd.args[0]}.")
+                    else:
+                        self._local(
+                            f"Invalid color '{cmd.args[0]}'. Use a name (blue/green/…) or #rrggbb."
+                        )
+
+            case "quote":
+                self._local("Type /quote followed by a space to enter line-selection mode.")
+
+            case "pin":
+                self._local("Type /pin followed by a space to enter line-selection mode.")
+
             case "quit":
                 if self._ws_worker:
                     self._ws_worker.stop()
@@ -236,6 +271,9 @@ class TraxusApp(App):
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
 
     def on_key(self, event: events.Key) -> None:
+        if self._selection_command is not None:
+            self._handle_selection_key(event)
+            return
         if event.key == self._ptt_key:
             event.stop()
             if self._ptt_mode == "hold" and not self._ptt_key.startswith("mouse"):
@@ -446,6 +484,7 @@ class TraxusApp(App):
                     chat.load_history(payload.get("history", []))
                     chat.append_system(f"Joined #{channel}")
                     chat.update_members([])
+                    chat.update_pin(payload.get("pin"))
 
             case "left":
                 channel = payload.get("channel", "")
@@ -505,6 +544,10 @@ class TraxusApp(App):
                     elif not self.current_voice_channel and prev_channel:
                         self._exit_vad_listening()
 
+            case "pin_added":
+                if chat:
+                    chat.update_pin(payload)
+
             case "user_list":
                 channel = payload.get("channel", "")
                 users = payload.get("users", [])
@@ -562,7 +605,95 @@ class TraxusApp(App):
             if self._ptt_mode == "vad":
                 self._exit_vad_listening()
 
+    # ── Selection mode ────────────────────────────────────────────────────────
+
+    def on_input_bar_selection_mode_requested(
+        self, msg: InputBar.SelectionModeRequested
+    ) -> None:
+        self._selection_command = msg.command
+        chat = self._chat()
+        if chat:
+            mv = chat._mv()
+            if mv:
+                mv.enter_selection_mode()
+            try:
+                chat.query_one(InputBar).disable()
+            except Exception:
+                pass
+
+    def _handle_selection_key(self, event: events.Key) -> None:
+        event.stop()
+        key = event.key
+        chat = self._chat()
+        mv = chat._mv() if chat else None
+
+        if key == "up" and mv:
+            mv.move_cursor(-1)
+        elif key == "down" and mv:
+            mv.move_cursor(1)
+        elif key == "enter":
+            payload = mv.selected_payload() if mv else None
+            markup = mv.selected_line_markup() if mv else ""
+            cmd = self._selection_command
+            self._exit_selection_mode()
+            if cmd == "quote":
+                self._handle_quote(payload, markup)
+            elif cmd == "pin":
+                self._handle_pin(payload)
+        elif key == "escape":
+            self._exit_selection_mode()
+
+    def _exit_selection_mode(self) -> None:
+        self._selection_command = None
+        chat = self._chat()
+        if chat:
+            mv = chat._mv()
+            if mv:
+                mv.exit_selection_mode()
+            try:
+                chat.query_one(InputBar).enable()
+            except Exception:
+                pass
+
+    def _handle_quote(self, payload: dict | None, markup: str) -> None:
+        if payload is not None:
+            nick = payload.get("username", "?")
+            content = payload.get("content", "")
+            # Strip any nested quote separator so quotes don't nest indefinitely
+            raw = content.split(" › ")[0].strip() if " › " in content else content
+            quoted = f"> @{nick}: {raw} › "
+        else:
+            plain = _strip_markup(markup).strip()
+            quoted = f"> {plain} › "
+        try:
+            chat = self._chat()
+            if chat:
+                inp = chat.query_one(InputBar)
+                inp.query_one("#message-input").value = quoted
+                inp.focus_input()
+        except Exception:
+            pass
+
+    def _handle_pin(self, payload: dict | None) -> None:
+        if payload is None or not payload.get("msg_id"):
+            self._local("Cannot pin this line — no message ID (system message or legacy).")
+            return
+        self._send({
+            "type": C2S.PIN_MESSAGE,
+            "channel": self.current_channel,
+            "msg_id": payload["msg_id"],
+            "username": payload.get("username", ""),
+            "content": payload.get("content", ""),
+        })
+
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _set_nick_color(self, hex_or_empty: str) -> None:
+        from client.settings import load_settings, save_settings
+        self._nick_color = hex_or_empty
+        settings = load_settings()
+        settings["nick_color"] = hex_or_empty
+        save_settings(settings)
 
     def _send(self, payload: dict) -> None:
         if self._ws_worker:

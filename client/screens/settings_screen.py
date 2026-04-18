@@ -48,6 +48,10 @@ class SettingsScreen(ModalScreen[str | None]):
         })
         return settings
 
+    def _nick_color_label(self) -> str:
+        color = getattr(self.app, "_nick_color", "")
+        return f"Nick Color: {color if color else 'default'}"
+
     def _ns_label(self) -> str:
         enabled = getattr(
             getattr(self.app, "_audio_engine", None), "noise_suppression_enabled", True
@@ -55,12 +59,8 @@ class SettingsScreen(ModalScreen[str | None]):
         return f"Noise Suppression: {'On' if enabled else 'Off'}"
 
     def _sens_label(self) -> str:
-        sens = getattr(self.app, "_vad_sensitivity", "high")
-        if sens == "custom":
-            thr = int(getattr(self.app, "_vad_custom_threshold", 50.0))
-            return f"VAD Sensitivity: Custom ({thr})"
-        label = _VAD_SENSITIVITY_LABELS.get(sens, "High")
-        return f"VAD Sensitivity: {label}"
+        thr = int(getattr(self.app, "_vad_custom_threshold", 250))
+        return f"VAD Threshold: {thr}"
 
     def compose(self) -> ComposeResult:
         current_mode = getattr(self.app, "_ptt_mode", "toggle")
@@ -71,6 +71,7 @@ class SettingsScreen(ModalScreen[str | None]):
             ListItem(Label(f"PTT Mode: {mode_label}"), id="item-ptt-mode"),
             ListItem(Label(self._sens_label()), id="item-vad-sensitivity"),
             ListItem(Label(self._ns_label()), id="item-noise-suppression"),
+            ListItem(Label(self._nick_color_label()), id="item-nick-color"),
             ListItem(Label("Test Microphone"), id="item-mic-test"),
             id="settings-list",
         )
@@ -93,6 +94,9 @@ class SettingsScreen(ModalScreen[str | None]):
         self.query_one("#item-noise-suppression", ListItem).query_one(Label).update(
             self._ns_label()
         )
+        self.query_one("#item-nick-color", ListItem).query_one(Label).update(
+            self._nick_color_label()
+        )
         self._update_vad_sensitivity_visibility()
         self._update_noise_suppression_visibility()
         self._update_mic_test_visibility()
@@ -114,9 +118,11 @@ class SettingsScreen(ModalScreen[str | None]):
         elif event.item.id == "item-ptt-mode":
             self._cycle_ptt_mode()
         elif event.item.id == "item-vad-sensitivity":
-            self._cycle_vad_sensitivity()
+            self._open_vad_sensitivity_screen()
         elif event.item.id == "item-noise-suppression":
             self._toggle_noise_suppression()
+        elif event.item.id == "item-nick-color":
+            self._open_color_picker()
         elif event.item.id == "item-mic-test":
             self._open_mic_test()
 
@@ -135,22 +141,19 @@ class SettingsScreen(ModalScreen[str | None]):
         save_settings(self._all_settings())
         self._rebuild_settings_list()
 
-    def _cycle_vad_sensitivity(self) -> None:
-        from client.settings import save_settings
-        current = getattr(self.app, "_vad_sensitivity", "high")
-        if current == "custom":
-            # Already on custom — open calibration screen
-            self._open_calibration()
-            return
-        idx = _VAD_SENSITIVITY_CYCLE.index(current) if current in _VAD_SENSITIVITY_CYCLE else 2
-        new_sens = _VAD_SENSITIVITY_CYCLE[(idx + 1) % len(_VAD_SENSITIVITY_CYCLE)]
-        self.app._vad_sensitivity = new_sens
-        save_settings(self._all_settings())
-        if new_sens == "custom":
-            self._open_calibration()
-        else:
-            self._restart_vad_if_active()
+    def _open_vad_sensitivity_screen(self) -> None:
+        from client.screens.vad_sensitivity_screen import VadSensitivityScreen
+        thr = getattr(self.app, "_vad_custom_threshold", 250.0)
+        self.app.push_screen(VadSensitivityScreen(thr), self._on_vad_sensitivity_result)
+
+    def _on_vad_sensitivity_result(self, result: float | None) -> None:
+        if result is not None:
+            from client.settings import save_settings
+            self.app._vad_sensitivity = "custom"
+            self.app._vad_custom_threshold = result
+            save_settings(self._all_settings())
             self._rebuild_settings_list()
+            self._restart_vad_if_active()
 
     def _toggle_noise_suppression(self) -> None:
         from client.settings import save_settings
@@ -159,6 +162,16 @@ class SettingsScreen(ModalScreen[str | None]):
             return
         engine.noise_suppression_enabled = not engine.noise_suppression_enabled
         save_settings(self._all_settings())
+        self._rebuild_settings_list()
+
+    def _open_color_picker(self) -> None:
+        from client.screens.color_picker_screen import ColorPickerScreen
+        current = getattr(self.app, "_nick_color", "")
+        self.app.push_screen(ColorPickerScreen(current), self._on_color_picked)
+
+    def _on_color_picked(self, result: str | None) -> None:
+        if result is not None:
+            self.app._set_nick_color(result)  # type: ignore[attr-defined]
         self._rebuild_settings_list()
 
     def _open_mic_test(self) -> None:
