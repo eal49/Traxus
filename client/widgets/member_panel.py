@@ -3,12 +3,31 @@ from __future__ import annotations
 from textual import events
 from textual.widget import Widget
 
+_MIN_WIDTH = 22
+_MAX_WIDTH = 40
+# Display columns consumed by the non-nick parts of a voice row:
+#   " " cursor " " "🔊"(2) " " + "  " bar(15) = 1+1+1+2+1+2+15 = 23
+_VOICE_OVERHEAD = 23
+_MEMBER_INDENT = 2  # leading spaces before member name
+# border-left: tall in CSS consumes 1 column from the content area;
+# add this to the computed content width when setting styles.width.
+_BORDER_OVERHEAD = 1
+
+
+def _clip_nick(name: str, max_len: int) -> str:
+    if len(name) <= max_len:
+        return name
+    return (name[:max_len - 3] + "...") if max_len > 3 else name[:max_len]
+
 
 class MemberPanel(Widget):
     """Right-side panel showing channel members and in-voice participants.
 
     When focused, ↑/↓ navigate among voice users and ←/→ adjust their
     playback volume in 10% steps (0–200%, default 100%).
+
+    Width adapts to the longest nickname (clamped to _MIN_WIDTH–_MAX_WIDTH).
+    Nicknames that would overflow the max width are clipped with "…".
     """
 
     DEFAULT_CSS = ""
@@ -19,12 +38,28 @@ class MemberPanel(Widget):
         self._members: list[dict] = []
         self._sorted_voice_users: list[str] = []
         self._cursor: int = 0
+        self._panel_width: int = _MIN_WIDTH
 
     # ── AudioEngine access (same pattern as SettingsScreen) ───────────────────
 
     @property
     def _audio_engine(self):
-        return getattr(self.app, "_audio_engine", None)
+        try:
+            return getattr(self.app, "_audio_engine", None)
+        except Exception:
+            return None
+
+    # ── Width management ──────────────────────────────────────────────────────
+
+    def _recompute_width(self) -> None:
+        needed = _MIN_WIDTH
+        for m in self._members:
+            nick = m.get("username", "")
+            needed = max(needed, len(nick) + _MEMBER_INDENT)
+        for name in self._sorted_voice_users:
+            needed = max(needed, len(name) + _VOICE_OVERHEAD)
+        self._panel_width = min(_MAX_WIDTH, needed)
+        self.styles.width = self._panel_width + _BORDER_OVERHEAD
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -36,18 +71,22 @@ class MemberPanel(Widget):
         return f"{bar} {level:3d}%"
 
     def _build_markup(self) -> str:
+        max_voice_nick = max(1, self._panel_width - _VOICE_OVERHEAD)
+        max_member_nick = max(1, self._panel_width - _MEMBER_INDENT)
+
         lines = [r"[bold dim]  Members[/bold dim]"]
         for m in self._members:
-            name = m.get("username", "?")
+            name = _clip_nick(m.get("username", "?"), max_member_nick)
             lines.append(f"  {name}")
 
         if self._sorted_voice_users:
             lines.append("")
             lines.append(r"[bold dim]  In Voice[/bold dim]")
             for i, name in enumerate(self._sorted_voice_users):
+                display = _clip_nick(name, max_voice_nick)
                 cursor = "▶" if (i == self._cursor and self.has_focus) else " "
                 bar = self._volume_bar(name)
-                lines.append(f" {cursor} 🔊 {name}  {bar}")
+                lines.append(f" {cursor} 🔊 {display}  {bar}")
 
         return "\n".join(lines)
 
@@ -59,6 +98,7 @@ class MemberPanel(Widget):
 
     def set_members(self, members: list[dict]) -> None:
         self._members = list(members)
+        self._recompute_width()
         self.refresh()
 
     def update_voice(self, voice_users: list[dict]) -> None:
@@ -66,6 +106,7 @@ class MemberPanel(Widget):
             u.get("username", "") for u in voice_users if u.get("username")
         )
         self._cursor = 0
+        self._recompute_width()
         self.refresh()
 
     # ── Focus / blur re-render ────────────────────────────────────────────────

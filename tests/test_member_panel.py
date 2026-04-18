@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from client.app import TraxusApp
 from client.screens.chat_screen import ChatScreen
-from client.widgets.member_panel import MemberPanel
+from client.widgets.member_panel import MemberPanel, _clip_nick, _MIN_WIDTH, _MAX_WIDTH, _VOICE_OVERHEAD
 from client.widgets.message_view import MessageView
 
 
@@ -17,6 +17,61 @@ def _server_msg(payload: dict) -> TraxusApp.ServerMessage:
 
 def _line_count(mv: MessageView) -> int:
     return mv.line_count if hasattr(mv, "line_count") else len(mv.lines)
+
+
+# ── Nick clipping unit tests ─────────────────────────────────────────────────
+
+class TestClipNick(unittest.TestCase):
+
+    def test_short_nick_unchanged(self):
+        self.assertEqual(_clip_nick("alice", 10), "alice")
+
+    def test_exact_length_unchanged(self):
+        self.assertEqual(_clip_nick("alice", 5), "alice")
+
+    def test_long_nick_clipped_with_ellipsis(self):
+        result = _clip_nick("verylongusername", 10)
+        self.assertEqual(result, "verylon...")
+        self.assertEqual(len(result), 10)
+
+    def test_clip_at_max_width(self):
+        long_nick = "a" * 32
+        result = _clip_nick(long_nick, _MAX_WIDTH - _VOICE_OVERHEAD)
+        self.assertTrue(result.endswith("..."))
+        self.assertLessEqual(len(result), _MAX_WIDTH - _VOICE_OVERHEAD)
+
+    def test_panel_width_clamps_to_max(self):
+        mp = MemberPanel()
+        long_nick = "a" * 32
+        mp._members = [{"username": long_nick}]
+        mp._sorted_voice_users = [long_nick]
+        mp._recompute_width()
+        self.assertEqual(mp._panel_width, _MAX_WIDTH)
+
+    def test_panel_width_clamps_to_min(self):
+        mp = MemberPanel()
+        mp._members = []
+        mp._sorted_voice_users = []
+        mp._recompute_width()
+        self.assertEqual(mp._panel_width, _MIN_WIDTH)
+
+    def test_panel_width_fits_short_nick(self):
+        mp = MemberPanel()
+        mp._members = [{"username": "bob"}]
+        mp._sorted_voice_users = ["bob"]
+        mp._recompute_width()
+        # voice overhead + 3 = 26, which is > MIN_WIDTH(22) and < MAX_WIDTH(40)
+        self.assertEqual(mp._panel_width, _VOICE_OVERHEAD + 3)
+
+    def test_long_voice_nick_clipped_in_markup(self):
+        mp = MemberPanel()
+        long_nick = "a" * 32
+        mp._members = []
+        mp._sorted_voice_users = [long_nick]
+        mp._recompute_width()
+        markup = mp._build_markup()
+        self.assertNotIn(long_nick, markup)
+        self.assertIn("...", markup)
 
 
 # ── MemberPanel widget tests ─────────────────────────────────────────────────
