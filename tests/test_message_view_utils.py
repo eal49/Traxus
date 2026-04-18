@@ -92,5 +92,21 @@ class TestFmtTs(unittest.TestCase):
         self.assertRegex(result, r"^\d{2}:\d{2}$")
 
 
+class TestMessageViewWrap(unittest.IsolatedAsyncioTestCase):
+
+    async def test_wrap_enabled_after_mount(self):
+        from textual.app import App, ComposeResult
+        from client.widgets.message_view import MessageView
+
+        class _App(App):
+            def compose(self) -> ComposeResult:
+                yield MessageView()
+
+        app = _App()
+        async with app.run_test() as pilot:
+            view = app.query_one(MessageView)
+            self.assertTrue(view.wrap)
+
+
 if __name__ == "__main__":
     unittest.main()
