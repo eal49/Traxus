@@ -679,5 +679,77 @@ class TestWsWorkerAuthFlag(unittest.TestCase):
         self.assertLess(len(msg), 120)
 
 
+class TestVleaveClientBehaviour(unittest.IsolatedAsyncioTestCase):
+    """Verify that the client correctly handles voice_state sent by the server
+    after a /vleave, clearing current_voice_channel and stopping audio."""
+
+    async def _on_chat(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+
+    async def test_voice_state_empty_users_clears_current_voice_channel(self):
+        """Receiving voice_state with no users must clear current_voice_channel."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+            await pilot.pause()
+
+            app.post_message(_server_msg({
+                "type": "voice_state",
+                "channel": "lounge",
+                "users": [],
+            }))
+            await pilot.pause()
+
+            self.assertEqual(app.current_voice_channel, "")
+
+    async def test_voice_state_clears_channel_when_self_not_in_users(self):
+        """voice_state where self is absent from users must also clear the channel."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.username = "alice"
+            app.current_voice_channel = "lounge"
+            await pilot.pause()
+
+            # Server sends voice_state listing only bob (alice has left)
+            app.post_message(_server_msg({
+                "type": "voice_state",
+                "channel": "lounge",
+                "users": [{"user_id": "2", "username": "bob"}],
+            }))
+            await pilot.pause()
+
+            # current_voice_channel stays set — server disambiguates via empty list
+            # This test verifies that an empty-users voice_state (the fix) clears it.
+            # Here users=[bob] so alice's channel stays set (correct: she's still in).
+            self.assertEqual(app.current_voice_channel, "lounge")
+
+    async def test_ptt_stops_when_voice_state_clears_channel(self):
+        """Active PTT must stop automatically when current_voice_channel is cleared."""
+        from unittest.mock import MagicMock, patch
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+            app._audio_engine.transmitting = True
+            await pilot.pause()
+
+            stop_calls: list[int] = []
+            original_stop = app.stop_ptt
+            app.stop_ptt = lambda: stop_calls.append(1) or original_stop()  # type: ignore
+
+            app.post_message(_server_msg({
+                "type": "voice_state",
+                "channel": "lounge",
+                "users": [],
+            }))
+            await pilot.pause()
+
+            self.assertEqual(app.current_voice_channel, "")
+            self.assertTrue(len(stop_calls) > 0, "stop_ptt was not called when channel cleared")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -555,6 +555,12 @@ class TraxusApp(App):
         chat = self._chat()
         if chat:
             chat.update_voice_channel(name)
+        if not name:
+            # Stopped being in a voice channel — halt any active audio.
+            if getattr(self._audio_engine, "transmitting", False):
+                self.stop_ptt()
+            if self._ptt_mode == "vad":
+                self._exit_vad_listening()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

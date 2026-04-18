@@ -362,6 +362,8 @@ class MessageRouter:
         voice_state = {"type": S2C.VOICE_STATE, "channel": channel, "users": members}
         for vc in self._conn.voice_clients_in_channel(channel):
             await self._conn.send_to(vc.user_id, voice_state)
+        # Notify the leaving client so it can clear its local voice-channel state.
+        await self._conn.send_to(client.user_id, voice_state)
         log.info("VLEAVE user=%s channel=#%s", client.username, channel)
         return client
 

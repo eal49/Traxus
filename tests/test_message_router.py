@@ -648,6 +648,22 @@ class TestVoiceLeave(unittest.IsolatedAsyncioTestCase):
         usernames = [u["username"] for u in msg.get("users", [])]
         self.assertNotIn("alice", usernames)
 
+    async def test_voice_leave_notifies_leaving_client(self):
+        """The leaving client must receive voice_state so it can clear its UI state."""
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        msg = self.ws.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(msg, "leaving client did not receive voice_state")
+        self.assertEqual(msg.get("channel"), "lounge")
+
+    async def test_voice_leave_notifies_leaving_client_users_excludes_self(self):
+        """voice_state sent to the leaver must not include the leaver in users."""
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        msg = self.ws.first_of_type(S2C.VOICE_STATE)
+        usernames = [u["username"] for u in msg.get("users", [])]
+        self.assertNotIn("alice", usernames)
+
 
 class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
 
