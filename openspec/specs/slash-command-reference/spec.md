@@ -111,3 +111,16 @@ The client SHALL support a `/who` command that displays the current channel's me
 #### Scenario: docs/commands.md documents /color
 - **WHEN** a developer opens `docs/commands.md`
 - **THEN** they SHALL find an entry for `/color` with syntax, argument table (name-or-hex, optional), predefined color names, and behavior notes
+
+---
+
+### Requirement: /audioTest command is documented in the command reference
+The `HELP_TEXT` constant in `client/commands.py` SHALL include an entry for `/audioTest`, and `KNOWN_COMMANDS` SHALL include `"audiotest"`.
+
+#### Scenario: Help text entry present
+- **WHEN** the user types `/help` in the client
+- **THEN** the output SHALL include a line documenting `/audioTest` and its purpose
+
+#### Scenario: audiotest in KNOWN_COMMANDS
+- **WHEN** the user types `/audioTest` (any case)
+- **THEN** `parse_input` SHALL return a `ParsedCommand` with `name == "audiotest"`

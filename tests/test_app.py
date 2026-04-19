@@ -810,5 +810,136 @@ class TestNickColor(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(app._nick_color, "")  # unchanged
 
 
+class TestGenTone(unittest.TestCase):
+    """Unit tests for the _gen_tone helper."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy not available")
+
+    def test_shape_one_second(self):
+        from client.app import _gen_tone
+        tone = _gen_tone(440.0, 1.0)
+        self.assertEqual(tone.shape, (16000,))
+
+    def test_dtype_int16(self):
+        from client.app import _gen_tone
+        import numpy as np
+        tone = _gen_tone(440.0, 1.0)
+        self.assertEqual(tone.dtype, np.int16)
+
+    def test_non_zero_amplitude(self):
+        from client.app import _gen_tone
+        import numpy as np
+        tone = _gen_tone(440.0, 1.0)
+        self.assertGreater(float(np.max(np.abs(tone.astype(np.int32)))), 1000)
+
+
+class TestApplyTaper(unittest.TestCase):
+    """Unit tests for the _apply_taper helper."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy not available")
+
+    def test_first_sample_near_zero(self):
+        from client.app import _gen_tone, _apply_taper
+        tone = _gen_tone(440.0, 1.0)
+        tapered = _apply_taper(tone)
+        self.assertAlmostEqual(float(tapered[0]), 0.0, delta=1.0)
+
+    def test_last_sample_near_zero(self):
+        from client.app import _gen_tone, _apply_taper
+        tone = _gen_tone(440.0, 1.0)
+        tapered = _apply_taper(tone)
+        self.assertAlmostEqual(float(tapered[-1]), 0.0, delta=1.0)
+
+    def test_middle_unchanged(self):
+        from client.app import _gen_tone, _apply_taper
+        import numpy as np
+        tone = _gen_tone(440.0, 1.0)
+        tapered = _apply_taper(tone, ramp_samples=160)
+        mid = len(tone) // 2
+        self.assertEqual(int(tapered[mid]), int(tone[mid]))
+
+    def test_returns_copy(self):
+        from client.app import _gen_tone, _apply_taper
+        tone = _gen_tone(440.0, 1.0)
+        original_first = int(tone[0])
+        _apply_taper(tone)
+        self.assertEqual(int(tone[0]), original_first)
+
+
+class TestAudioTestCommand(unittest.IsolatedAsyncioTestCase):
+    """Guard paths and reentrancy for /audioTest."""
+
+    async def test_guard_audio_unavailable(self):
+        from unittest.mock import patch
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+            with patch("client.app.AUDIO_AVAILABLE", False), \
+                 patch("client.app._NUMPY_AVAILABLE", False):
+                app.handle_input("/audioTest")
+                await pilot.pause()
+            self.assertGreater(_line_count(mv), before)
+
+    async def test_guard_not_connected(self):
+        from unittest.mock import patch
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+            with patch("client.app.AUDIO_AVAILABLE", True), \
+                 patch("client.app._NUMPY_AVAILABLE", True):
+                app._ws_worker = None
+                app.handle_input("/audioTest")
+                await pilot.pause()
+            self.assertGreater(_line_count(mv), before)
+
+    async def test_guard_no_voice_channel(self):
+        from unittest.mock import patch, MagicMock
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+            with patch("client.app.AUDIO_AVAILABLE", True), \
+                 patch("client.app._NUMPY_AVAILABLE", True):
+                app._ws_worker = MagicMock()
+                app.current_voice_channel = ""
+                app.handle_input("/audioTest")
+                await pilot.pause()
+            self.assertGreater(_line_count(mv), before)
+
+    async def test_guard_already_running(self):
+        from unittest.mock import patch, MagicMock
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+            with patch("client.app.AUDIO_AVAILABLE", True), \
+                 patch("client.app._NUMPY_AVAILABLE", True):
+                app._ws_worker = MagicMock()
+                app.current_voice_channel = "lounge"
+                app._audio_test_running = True
+                app.handle_input("/audioTest")
+                await pilot.pause()
+            self.assertGreater(_line_count(mv), before)
+            self.assertTrue(app._audio_test_running)
+
+
 if __name__ == "__main__":
     unittest.main()

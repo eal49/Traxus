@@ -159,6 +159,18 @@ class TestParseInput(unittest.TestCase):
     def test_pin_in_help_text(self):
         self.assertIn("pin", HELP_TEXT)
 
+    def test_audiotest_parsed(self):
+        cmd = parse_input("/audioTest")
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd.name, "audiotest")
+        self.assertEqual(cmd.args, [])
+
+    def test_audiotest_in_known_commands(self):
+        self.assertIn("audiotest", KNOWN_COMMANDS)
+
+    def test_audiotest_in_help_text(self):
+        self.assertIn("audioTest", HELP_TEXT)
+
 
 if __name__ == "__main__":
     unittest.main()

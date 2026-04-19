@@ -45,6 +45,7 @@ HELP_TEXT = """\
   /color <name|#hex>  Set your nick color (blue/green/red/… or #rrggbb); "reset" to clear
   /quote              Quote a message line (type "/quote " to enter selection mode)
   /pin                Pin a message to the top of the channel (type "/pin " to select)
+  /audioTest          Send 10 test tones over the active voice channel (latency / pipeline test)
   /help               Show this help
   /quit               Disconnect and exit\
 """
@@ -52,4 +53,5 @@ HELP_TEXT = """\
 KNOWN_COMMANDS = {
     "join", "leave", "nick", "channels", "create", "who", "help", "quit",
     "vcreate", "vjoin", "vleave", "settings", "color", "quote", "pin",
+    "audiotest",
 }

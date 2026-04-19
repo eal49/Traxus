@@ -34,6 +34,31 @@ PTT_HOLD_DEBOUNCE_MS = 300
 PTT_HOLD_INITIAL_DEBOUNCE_MS = 800  # > Windows initial key-repeat delay (~500 ms)
 VAD_HANGOVER_MS = 400
 
+# ── Audio test tone generation ────────────────────────────────────────────────
+
+try:
+    import numpy as _np
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    _NUMPY_AVAILABLE = False
+
+# C major scale C4→E5 (10 notes, one per count)
+_AUDIO_TEST_FREQS = [261.63, 293.66, 329.63, 349.23, 392.00,
+                     440.00, 493.88, 523.25, 587.33, 659.25]
+
+
+def _gen_tone(freq: float, duration: float, sample_rate: int = 16000) -> "np.ndarray":
+    t = _np.linspace(0.0, duration, int(sample_rate * duration), endpoint=False)
+    return (_np.sin(2.0 * _np.pi * freq * t) * 26214.0).astype(_np.int16)
+
+
+def _apply_taper(tone: "np.ndarray", ramp_samples: int = 160) -> "np.ndarray":
+    tone = tone.copy()
+    ramp = (1.0 - _np.cos(_np.linspace(0.0, _np.pi, ramp_samples))) / 2.0
+    tone[:ramp_samples] = (tone[:ramp_samples].astype(_np.float32) * ramp).astype(_np.int16)
+    tone[-ramp_samples:] = (tone[-ramp_samples:].astype(_np.float32) * ramp[::-1]).astype(_np.int16)
+    return tone
+
 _VAD_SENSITIVITY_THRESHOLDS: dict[str, float] = {
     "low":       600.0,
     "medium":    400.0,
@@ -76,6 +101,7 @@ class TraxusApp(App):
         self._ws_worker: WsWorker | None = None
         self._ptt_debounce_task: asyncio.Task | None = None
         self._vad_hangover_task: asyncio.Task | None = None
+        self._audio_test_running: bool = False
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
         self._selection_command: str | None = None
@@ -253,6 +279,18 @@ class TraxusApp(App):
             case "pin":
                 self._local("Type /pin followed by a space to enter line-selection mode.")
 
+            case "audiotest":
+                if not AUDIO_AVAILABLE or not _NUMPY_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy not installed.")
+                elif not self._ws_worker:
+                    self._local("Not connected.")
+                elif not self.current_voice_channel:
+                    self._local("Join a voice channel first (/vjoin <channel>).")
+                elif self._audio_test_running:
+                    self._local("Audio test already in progress.")
+                else:
+                    asyncio.get_running_loop().create_task(self._audio_test_task())
+
             case "quit":
                 if self._ws_worker:
                     self._ws_worker.stop()
@@ -343,6 +381,25 @@ class TraxusApp(App):
         chat = self._chat()
         if chat:
             chat.update_ptt(False)
+
+    async def _audio_test_task(self) -> None:
+        from shared.voice_protocol import pack_c2s
+        from shared.adpcm import CODEC_RAW
+        self._audio_test_running = True
+        try:
+            channel = self.current_voice_channel
+            self._local("Audio test: sending 10 tones...")
+            queue = self._ws_worker._binary_send_queue  # type: ignore[union-attr]
+            for freq in _AUDIO_TEST_FREQS:
+                tone = _apply_taper(_gen_tone(freq, 1.0))
+                for offset in range(0, len(tone), 320):
+                    frame = tone[offset:offset + 320]
+                    packed = pack_c2s(channel, frame.tobytes(), CODEC_RAW)
+                    queue.put_nowait(packed)
+                    await asyncio.sleep(0.020)
+            self._local("Audio test complete.")
+        finally:
+            self._audio_test_running = False
 
     def _arm_ptt_debounce(self, delay_ms: int = PTT_HOLD_DEBOUNCE_MS) -> None:
         self._cancel_ptt_debounce()
