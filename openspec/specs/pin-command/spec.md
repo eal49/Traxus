@@ -1,5 +1,8 @@
-## ADDED Requirements
+# pin-command Specification
 
+## Purpose
+TBD - created by archiving change message-line-selection. Update Purpose after archive.
+## Requirements
 ### Requirement: Every chat message carries a server-assigned msg_id
 The server SHALL attach a unique `msg_id` string to every chat message it relays to channel members, so individual messages can be referenced across clients.
 
@@ -62,3 +65,4 @@ The server SHALL maintain at most one pinned message per channel in memory.
 #### Scenario: Pin is cleared on server restart
 - **WHEN** the server process restarts
 - **THEN** all pins SHALL be cleared (in-memory only; no persistence required)
+

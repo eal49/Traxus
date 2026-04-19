@@ -41,7 +41,6 @@ async def _setup_voice(app, pilot):
     app.current_voice_channel = "lounge"
     app._audio_engine.start = MagicMock()
     app._audio_engine.stop = MagicMock()
-    app._audio_engine.set_send_target = MagicMock()
 
 
 # ── Toggle mode regression ────────────────────────────────────────────────────
@@ -56,11 +55,11 @@ class TestToggleModeRegression(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app._ptt_mode = "toggle"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
     async def test_toggle_mode_second_press_stops_transmitting(self):
         app = TraxusApp()
@@ -69,13 +68,13 @@ class TestToggleModeRegression(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app._ptt_mode = "toggle"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
                 await pilot.press("f9")
                 await pilot.pause()
 
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
 
 # ── Hold mode — mouse ─────────────────────────────────────────────────────────
@@ -89,11 +88,11 @@ class TestHoldModeMouse(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app.on_mouse_down(_make_mouse_down(3))
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
     async def test_mouse_up_stops_transmitting_in_hold_mode(self):
         app = TraxusApp()
@@ -102,15 +101,15 @@ class TestHoldModeMouse(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app.on_mouse_down(_make_mouse_down(3))
                 await pilot.pause()
-                self.assertTrue(app._audio_engine.transmitting)
+                self.assertTrue(app._transmitting)
 
                 app.on_mouse_up(_make_mouse_up(3))
                 await pilot.pause()
 
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
     async def test_mouse_up_wrong_button_does_not_stop(self):
         app = TraxusApp()
@@ -119,13 +118,13 @@ class TestHoldModeMouse(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app.on_mouse_down(_make_mouse_down(3))
                 await pilot.pause()
                 app.on_mouse_up(_make_mouse_up(1))  # wrong button
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
     async def test_toggle_mode_mouse_up_has_no_effect(self):
         """MouseUp in toggle mode must not stop PTT."""
@@ -135,13 +134,13 @@ class TestHoldModeMouse(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app._ptt_mode = "toggle"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app.on_mouse_down(_make_mouse_down(3))
                 await pilot.pause()
                 app.on_mouse_up(_make_mouse_up(3))
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
 
 # ── Hold mode — keyboard debounce ─────────────────────────────────────────────
@@ -155,11 +154,11 @@ class TestHoldModeKeyboard(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
     async def test_debounce_stops_transmitting_after_timeout(self):
         app = TraxusApp()
@@ -168,11 +167,11 @@ class TestHoldModeKeyboard(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 # First press starts PTT (no debounce armed yet)
                 await pilot.press("f9")
                 await pilot.pause()
-                self.assertTrue(app._audio_engine.transmitting)
+                self.assertTrue(app._transmitting)
 
                 # Second press (simulates key-repeat) arms the debounce
                 await pilot.press("f9")
@@ -182,7 +181,7 @@ class TestHoldModeKeyboard(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep((PTT_HOLD_DEBOUNCE_MS + 100) / 1000)
                 await pilot.pause()
 
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
     async def test_repeated_key_events_reset_debounce(self):
         """Key-repeat events within the debounce window keep PTT active."""
@@ -192,7 +191,7 @@ class TestHoldModeKeyboard(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app._ptt_mode = "hold"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
@@ -205,7 +204,7 @@ class TestHoldModeKeyboard(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 # Still transmitting — debounce was reset each time
-                self.assertTrue(app._audio_engine.transmitting)
+                self.assertTrue(app._transmitting)
 
 
 # ── Settings persistence ──────────────────────────────────────────────────────

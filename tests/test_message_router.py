@@ -691,119 +691,19 @@ class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("alice", usernames)
 
 
-class TestRelayVoice(unittest.IsolatedAsyncioTestCase):
+class TestRelayVoiceNoOp(unittest.IsolatedAsyncioTestCase):
+    """relay_voice is now a no-op — audio goes via WebRTC."""
 
-    async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
-        self.ws_a = MockWs()
-        self.ws_b = MockWs()
-        self.ws_c = MockWs()
+    async def test_relay_voice_is_no_op(self):
+        router, conn, chan = make_router()
+        ws_a = MockWs()
+        alice = await do_auth(router, conn, ws_a)
+        chan.vcreate("lounge", "Voice", "system")
+        alice.voice_channels.add("lounge")
 
-        self.alice = await do_auth(self.router, self.conn, self.ws_a)
-        self.bob   = await do_auth(self.router, self.conn, self.ws_b, username="bob")
-        self.carol = await do_auth(self.router, self.conn, self.ws_c, username="carol")
-
-        self.chan.vcreate("lounge", "Voice", "system")
-        self.alice.voice_channels.add("lounge")
-        self.bob.voice_channels.add("lounge")
-        # carol is NOT in voice
-
-    def _make_frame(self, channel: str, pcm: bytes) -> bytes:
-        ch = channel.encode()
-        return bytes([len(ch)]) + ch + pcm
-
-    async def test_relay_reaches_other_voice_member(self):
-        frame = self._make_frame("lounge", b"\x01\x02")
-        await self.router.relay_voice(frame, self.ws_a, self.alice)
-        self.assertTrue(len(self.ws_b.sent) > 0 or
-                        len([m for m in self.ws_b.sent]) > 0)
-        # ws_b should have received binary — check via direct attribute
-        self.assertTrue(self.ws_b.binary_sent if hasattr(self.ws_b, "binary_sent") else True)
-
-    async def test_relay_not_echoed_to_sender(self):
-        # We need a MockWs that records binary sends
-        class BinaryMockWs:
-            def __init__(self):
-                self.binary: list[bytes] = []
-                self.sent: list[dict] = []
-            async def send(self, data):
-                if isinstance(data, bytes):
-                    self.binary.append(data)
-                else:
-                    import json
-                    self.binary.append(data.encode())
-
-        ws_sender = BinaryMockWs()
-        ws_recv   = BinaryMockWs()
-
-        alice2 = self.conn.register(ws_sender, "alice2")
-        bob2   = self.conn.register(ws_recv,   "bob2")
-        alice2.voice_channels.add("lounge")
-        bob2.voice_channels.add("lounge")
-
-        frame = self._make_frame("lounge", b"\x01\x02")
-        await self.router.relay_voice(frame, ws_sender, alice2)
-
-        self.assertEqual(len(ws_sender.binary), 0, "Sender should not receive own frame")
-        self.assertGreater(len(ws_recv.binary), 0, "Receiver should get the frame")
-
-    async def test_non_member_does_not_receive_frame(self):
-        class BinaryMockWs:
-            def __init__(self):
-                self.binary: list[bytes] = []
-            async def send(self, data):
-                if isinstance(data, bytes):
-                    self.binary.append(data)
-
-        ws_s = BinaryMockWs()
-        ws_r = BinaryMockWs()
-        ws_non = BinaryMockWs()
-
-        sender    = self.conn.register(ws_s,   "sender_x")
-        member    = self.conn.register(ws_r,   "member_x")
-        nonmember = self.conn.register(ws_non, "nonmember_x")
-
-        sender.voice_channels.add("lounge")
-        member.voice_channels.add("lounge")
-        # nonmember NOT in lounge voice
-
-        frame = self._make_frame("lounge", b"\xAB\xCD")
-        await self.router.relay_voice(frame, ws_s, sender)
-
-        self.assertGreater(len(ws_r.binary), 0, "Voice member should receive frame")
-        self.assertEqual(len(ws_non.binary), 0, "Non-member must not receive frame")
-
-
-    async def test_relay_sends_to_all_even_when_one_raises(self):
-        """relay_voice must deliver to remaining receivers if one send() raises."""
-        class BinaryMockWs:
-            def __init__(self, fail: bool = False):
-                self.binary: list[bytes] = []
-                self.fail = fail
-            async def send(self, data):
-                if self.fail:
-                    raise ConnectionError("simulated send failure")
-                if isinstance(data, bytes):
-                    self.binary.append(data)
-
-        ws_s   = BinaryMockWs()
-        ws_ok  = BinaryMockWs(fail=False)
-        ws_bad = BinaryMockWs(fail=True)
-
-        sender  = self.conn.register(ws_s,   "sender_f")
-        healthy = self.conn.register(ws_ok,  "healthy_f")
-        broken  = self.conn.register(ws_bad, "broken_f")
-
-        sender.voice_channels.add("lounge")
-        healthy.voice_channels.add("lounge")
-        broken.voice_channels.add("lounge")
-
-        frame = self._make_frame("lounge", b"\x01\x02")
-        # Must not raise even though one receiver raises
-        await self.router.relay_voice(frame, ws_s, sender)
-
-        self.assertGreater(len(ws_ok.binary), 0,
-                           "Healthy receiver must still get the frame")
+        # relay_voice must not raise and must not send any binary frames
+        await router.relay_voice(b"\x00\x01\x02", ws_a, alice)
+        # No assertion needed beyond "no exception raised"; binary relay is removed.
 
 
 # ── msg_id in chat messages ───────────────────────────────────────────────────

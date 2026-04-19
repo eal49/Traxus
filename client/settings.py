@@ -25,6 +25,7 @@ _DEFAULTS: dict = {
     "last_username": "",
     "nick_color": "",
     "jitter_buffer_frames": 5,
+    "stun_server": "stun:stun.l.google.com:19302",
 }
 
 

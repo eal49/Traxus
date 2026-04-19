@@ -1,15 +1,15 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: WebSocket protocol reference document exists
 The project SHALL contain `docs/protocol.md` documenting every C2S and S2C JSON message type with field schemas and usage context.
 
 #### Scenario: All C2S message types are documented
 - **WHEN** a developer opens `docs/protocol.md`
-- **THEN** they SHALL find entries for all eight C2S types: auth, join, leave, message, nick, create, list_channels, ping
+- **THEN** they SHALL find entries for all C2S types including: auth, join, leave, message, nick, create, list_channels, ping, voice_join, voice_leave, voice_offer, voice_answer, voice_ice
 
 #### Scenario: All S2C message types are documented
 - **WHEN** a developer opens `docs/protocol.md`
-- **THEN** they SHALL find entries for all eleven S2C types: auth_ok, auth_error, channel_list, joined, left, chat, system, nick_changed, channel_created, user_list, error, pong
+- **THEN** they SHALL find entries for all S2C types including: auth_ok, auth_error, channel_list, joined, left, chat, system, nick_changed, channel_created, user_list, error, pong, voice_state, voice_offer, voice_answer, voice_ice
 
 #### Scenario: Each message entry has a field schema table
 - **WHEN** a developer reads any message type entry
@@ -35,12 +35,46 @@ The `docs/protocol.md` file SHALL specify the transport layer, encoding, and mes
 
 ---
 
-### Requirement: Binary frame transport documented
-`docs/protocol.md` Transport & Encoding section SHALL note that binary frames are used for audio data alongside text JSON frames, and SHALL document the codec tag byte in the frame layout.
+### Requirement: WebRTC signaling flow documented
+`docs/protocol.md` SHALL include a WebRTC Signaling Flow section describing the offer/answer/ICE exchange sequence used to establish peer-to-peer audio.
 
-#### Scenario: Transport section covers binary frames with codec tag
-- **WHEN** a developer reads the Transport & Encoding section in docs/protocol.md
-- **THEN** they SHALL find a description stating binary frames carry a 1-byte codec tag (`0x00` = raw PCM, `0x01` = IMA ADPCM) followed by the audio payload, after the channel/username header bytes
+#### Scenario: Signaling flow section present
+- **WHEN** a developer reads `docs/protocol.md`
+- **THEN** they SHALL find a section describing the three-message WebRTC signaling flow: voice_offer, voice_answer, voice_ice
+
+---
+
+### Requirement: voice_offer signaling message documented
+`docs/protocol.md` SHALL document the `voice_offer` C2S and S2C message types with field schema and usage context.
+
+#### Scenario: voice_offer C2S entry present
+- **WHEN** a developer reads `docs/protocol.md`
+- **THEN** they SHALL find a `voice_offer` C2S entry with fields: `type` (string), `to_user` (string), `sdp` (string, SDP offer body)
+- **THEN** the entry SHALL state that the server relays this to the named peer in the same voice channel with `from_user` set
+
+#### Scenario: voice_offer S2C entry present
+- **WHEN** a developer reads `docs/protocol.md`
+- **THEN** they SHALL find a `voice_offer` S2C entry with fields: `type`, `from_user`, `to_user`, `sdp`
+
+---
+
+### Requirement: voice_answer signaling message documented
+`docs/protocol.md` SHALL document the `voice_answer` C2S and S2C message types.
+
+#### Scenario: voice_answer entries present
+- **WHEN** a developer reads `docs/protocol.md`
+- **THEN** they SHALL find `voice_answer` C2S and S2C entries with the same field layout as `voice_offer`
+- **THEN** the entry SHALL note this message carries the SDP answer from the callee to the caller
+
+---
+
+### Requirement: voice_ice signaling message documented
+`docs/protocol.md` SHALL document the `voice_ice` C2S and S2C message types.
+
+#### Scenario: voice_ice entries present
+- **WHEN** a developer reads `docs/protocol.md`
+- **THEN** they SHALL find `voice_ice` C2S and S2C entries with fields: `type`, `to_user` / `from_user`, `candidate` (string or null), `sdpMid` (string), `sdpMLineIndex` (integer)
+- **THEN** the entry SHALL note that `candidate: null` signals end-of-candidates
 
 ---
 

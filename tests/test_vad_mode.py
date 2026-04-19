@@ -40,7 +40,6 @@ async def _setup_voice(app, pilot):
     app._audio_engine.start = MagicMock()
     app._audio_engine.stop = MagicMock()
     app._audio_engine.stop_vad = MagicMock()
-    app._audio_engine.set_send_target = MagicMock()
 
 
 # ── AudioEngine unit tests ─────────────────────────────────────────────────────
@@ -109,11 +108,11 @@ class TestVadOnsetAndHangover(unittest.IsolatedAsyncioTestCase):
             await _setup_voice(app, pilot)
             app._ptt_mode = "vad"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._on_vad_state(True)
                 await pilot.pause()
 
-            self.assertTrue(app._audio_engine.transmitting)
+            self.assertTrue(app._transmitting)
 
     async def test_vad_hangover_stops_transmitting_after_timeout(self):
         app = TraxusApp()
@@ -121,11 +120,11 @@ class TestVadOnsetAndHangover(unittest.IsolatedAsyncioTestCase):
             await _setup_voice(app, pilot)
             app._ptt_mode = "vad"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 # Start transmitting via voice onset
                 app._on_vad_state(True)
                 await pilot.pause()
-                self.assertTrue(app._audio_engine.transmitting)
+                self.assertTrue(app._transmitting)
 
                 # Silence arms the hangover
                 app._on_vad_state(False)
@@ -135,7 +134,7 @@ class TestVadOnsetAndHangover(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep((VAD_HANGOVER_MS + 100) / 1000)
                 await pilot.pause()
 
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
     async def test_vad_hangover_reset_keeps_transmitting(self):
         """Voice returning within the hangover window cancels the stop."""
@@ -144,7 +143,7 @@ class TestVadOnsetAndHangover(unittest.IsolatedAsyncioTestCase):
             await _setup_voice(app, pilot)
             app._ptt_mode = "vad"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._on_vad_state(True)
                 await pilot.pause()
 
@@ -157,7 +156,7 @@ class TestVadOnsetAndHangover(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 # Still transmitting
-                self.assertTrue(app._audio_engine.transmitting)
+                self.assertTrue(app._transmitting)
 
 
 # ── Settings persistence ────────────────────────────────────────────────────

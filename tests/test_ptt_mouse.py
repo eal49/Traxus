@@ -47,15 +47,14 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                app._audio_engine.set_send_target = MagicMock()
 
                 app.on_mouse_down(_mouse_event(3))
                 await pilot.pause()
 
             self.assertTrue(
-                app._audio_engine.transmitting,
+                app._transmitting,
                 "mouse3 down must enable PTT when _ptt_key = 'mouse3'",
             )
 
@@ -69,14 +68,14 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "mouse3"
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
 
                 app.on_mouse_down(_mouse_event(1))
                 await pilot.pause()
 
             self.assertFalse(
-                app._audio_engine.transmitting,
+                app._transmitting,
                 "mouse1 must not trigger PTT when _ptt_key = 'mouse3'",
             )
 
@@ -90,15 +89,14 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
-                app._audio_engine.set_send_target = MagicMock()
 
                 await pilot.press("f9")
                 await pilot.pause()
 
             self.assertTrue(
-                app._audio_engine.transmitting,
+                app._transmitting,
                 "F9 must still toggle PTT when _ptt_key = 'f9'",
             )
 
@@ -112,14 +110,14 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
             app._ptt_key = "f9"
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 app._audio_engine.start = MagicMock()
 
                 app.on_mouse_down(_mouse_event(3))
                 await pilot.pause()
 
             self.assertFalse(
-                app._audio_engine.transmitting,
+                app._transmitting,
                 "mouse click must not trigger PTT when _ptt_key is a keyboard key",
             )
 

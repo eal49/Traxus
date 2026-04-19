@@ -1,25 +1,19 @@
 """
-AudioEngine — wraps sounddevice for PTT voice capture and playback.
+AudioEngine — microphone capture and VAD for the Traxus client.
+
+In the WebRTC pipeline, audio capture for transmission is handled by MicTrack
+(aiortc AudioStreamTrack).  AudioEngine retains responsibility for:
+  • VAD-mode mic listening and energy callbacks
+  • Spectral noise suppression (also consumed by MicTrack)
+  • Graceful degradation when sounddevice/numpy are unavailable
 
 Graceful degradation: if sounddevice or numpy are unavailable,
 AUDIO_AVAILABLE is set to False and all AudioEngine methods are no-ops.
-
-Playback architecture
----------------------
-Incoming PCM frames are put into a thread-safe queue by play() (a
-nanosecond operation).  A dedicated daemon thread owns a single
-sd.OutputStream and continuously writes from that queue.  This means:
-  • play() never blocks the asyncio event loop
-  • no per-frame stop()/start() cycles → no audio glitches
-  • the Textual message pump processes audio messages instantly
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import queue
-import threading
-import time
 
 log = logging.getLogger("traxus.audio")
 
@@ -32,18 +26,13 @@ except ImportError:
     np = None   # type: ignore[assignment]
     sd = None   # type: ignore[assignment]
 
-if AUDIO_AVAILABLE:
-    from shared.adpcm import CODEC_ADPCM, CODEC_RAW, decode as _adpcm_decode, encode as _adpcm_encode
-    from shared import voice_protocol
-    ADPCM_AVAILABLE = True
-else:
-    CODEC_RAW    = 0  # type: ignore[assignment]
-    CODEC_ADPCM  = 1  # type: ignore[assignment]
-    ADPCM_AVAILABLE = False
-    _adpcm_encode = None  # type: ignore[assignment]
-    _adpcm_decode = None  # type: ignore[assignment]
+try:
+    import aiortc as _aiortc  # noqa: F401
+    WEBRTC_AVAILABLE: bool = AUDIO_AVAILABLE
+except ImportError:
+    WEBRTC_AVAILABLE = False
 
-# Noise suppression uses only numpy (already required for ADPCM), so
+# Noise suppression uses only numpy (already required for audio), so
 # NS_AVAILABLE tracks the same condition as AUDIO_AVAILABLE.
 NS_AVAILABLE: bool = AUDIO_AVAILABLE
 
@@ -208,8 +197,6 @@ if AUDIO_AVAILABLE:
                 Noise-suppressed PCM, clipped to the int16 range.
             """
             # ── Step 1: promote to float64 for arithmetic precision ───────────
-            # int16 arithmetic overflows easily; float64 gives us 15 decimal
-            # digits of headroom.
             x: np.ndarray = pcm.astype(np.float64)
 
             # ── Step 2: Real FFT → complex spectrum X[k] ─────────────────────
@@ -219,17 +206,13 @@ if AUDIO_AVAILABLE:
             P_x: np.ndarray = X.real ** 2 + X.imag ** 2   # shape: (n_bins,)
 
             # ── Step 4: Voice-or-noise decision ──────────────────────────────
-            # Compare mean signal power to mean noise estimate.
-            # +1e-10 prevents division by zero on the very first frame.
             snr_global: float = float(np.mean(P_x)) / (float(np.mean(self._noise_power)) + 1e-10)
             alpha: float = self.ALPHA_SLOW if snr_global >= self.SNR_VOICE_THRESHOLD else self.ALPHA_FAST
 
             # ── Step 5: Update noise estimate (EMA) ──────────────────────────
-            # N̂[k] ← α · P_x[k] + (1−α) · N̂[k]
             self._noise_power = alpha * P_x + (1.0 - alpha) * self._noise_power
 
             # ── Step 6: Spectral subtraction with floor ───────────────────────
-            # P_y[k] = max( P_x[k] − α_sub·N̂[k],  β·P_x[k] )
             P_y: np.ndarray = np.maximum(
                 P_x - self.OVER_SUBTRACTION * self._noise_power,
                 self.SPECTRAL_FLOOR * P_x,
@@ -239,13 +222,9 @@ if AUDIO_AVAILABLE:
             G: np.ndarray = np.sqrt(P_y / np.maximum(P_x, 1e-10))
 
             # ── Step 8: Apply gain, preserve phase ───────────────────────────
-            # Ŷ[k] = X[k] · G[k]  →  |Ŷ[k]| = |X[k]|·G[k],  arg(Ŷ[k]) = arg(X[k])
             Y: np.ndarray = X * G
 
             # ── Step 9: Inverse real FFT → cleaned time domain ───────────────
-            # n=self._frame_size is explicit: irfft default returns 2*(M−1)
-            # samples which equals frame_size when frame_size is even (320 is),
-            # but being explicit avoids subtle bugs on odd frame sizes.
             y: np.ndarray = np.fft.irfft(Y, n=self._frame_size)
 
             # ── Step 10: Clip and cast back to int16 ─────────────────────────
@@ -255,21 +234,21 @@ _SAMPLERATE = 16_000
 _CHANNELS   = 1
 _DTYPE      = "int16"
 _BLOCKSIZE  = 320          # samples per capture callback
-_PLAY_QUEUE_MAX = 10       # max queued frames before drop-newest kicks in
-_FRAME_SECONDS  = _BLOCKSIZE / _SAMPLERATE   # 0.02 s = 20 ms per frame
 
 
 class AudioEngine:
-    """Manages microphone capture and speaker playback via sounddevice."""
+    """Manages microphone capture for VAD mode.
 
-    def __init__(self, jitter_buffer_frames: int = 3) -> None:
+    In the WebRTC pipeline actual PTT audio capture and transmission is
+    handled by MicTrack / PeerManager.  AudioEngine remains responsible
+    for VAD-mode mic listening, energy callbacks, and the spectral noise
+    suppressor (which MicTrack also uses via a shared reference).
+    """
+
+    def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream = None
         self._transmitting: bool = False
-        # Send target: set by set_send_target() before PTT, cleared after.
-        self._send_queue: asyncio.Queue | None = None
-        self._send_channel: str = ""
-        self._jitter_buffer_frames: int = max(1, jitter_buffer_frames)
 
         # Spectral noise suppressor (None when NS_AVAILABLE is False)
         self._suppressor: _SpectralNoiseSuppressor | None = (
@@ -277,31 +256,13 @@ class AudioEngine:
         )
         self.noise_suppression_enabled: bool = True
 
-        # Per-user playback volume (integer %, 0–200, default 100)
-        self._per_user_volume: dict[str, int] = {}
-
         # VAD state
         self._vad_active: bool = False
         self._vad_threshold: float = 250.0
         self._vad_callback = None          # callable(is_voice: bool) | None
-        self._vad_voice_state: bool = False  # last reported VAD state
+        self._vad_voice_state: bool = False
         self._energy_callback = None       # callable(rms: float) | None
         self._spectrum_callback = None     # callable(pcm_bytes: bytes) | None
-
-        # Loopback: route captured audio to the playback queue (mic test mode)
-        self.loopback_enabled: bool = False
-
-        # Playback: a thread-safe queue drained by a background thread.
-        # Items are (codec, audio_bytes, username) tuples; None is the shutdown sentinel.
-        self._play_queue: queue.Queue[tuple[int, bytes, str] | None] = queue.Queue(
-            maxsize=_PLAY_QUEUE_MAX
-        )
-        self._play_thread: threading.Thread | None = None
-        if AUDIO_AVAILABLE:
-            self._play_thread = threading.Thread(
-                target=self._playback_worker, daemon=True, name="traxus-playback"
-            )
-            self._play_thread.start()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -360,12 +321,6 @@ class AudioEngine:
         self._spectrum_callback = None
         self.stop()
 
-    def set_send_target(self, binary_send_queue, channel: str) -> None:
-        """Register where the capture callback should post packed audio frames.
-        Call with (None, "") to stop posting (e.g. on PTT stop or voice leave)."""
-        self._send_queue = binary_send_queue
-        self._send_channel = channel
-
     def set_energy_callback(self, cb) -> None:
         """Register a callback fired with the raw RMS float on every audio frame."""
         self._energy_callback = cb
@@ -374,11 +329,7 @@ class AudioEngine:
         """Register a callback fired with raw PCM bytes on every captured frame."""
         self._spectrum_callback = cb
 
-    def set_loopback(self, enabled: bool) -> None:
-        """Enable or disable mic loopback to the playback queue."""
-        self.loopback_enabled = enabled
-
-    # ── PTT state ─────────────────────────────────────────────────────────────
+    # ── PTT state (used by app.py on_key to read transmit status) ─────────────
 
     @property
     def transmitting(self) -> bool:
@@ -387,16 +338,6 @@ class AudioEngine:
     @transmitting.setter
     def transmitting(self, value: bool) -> None:
         self._transmitting = value
-
-    # ── Per-user volume ────────────────────────────────────────────────────────
-
-    def get_volume(self, username: str) -> int:
-        """Return the playback volume for username as an integer percentage (0–200)."""
-        return self._per_user_volume.get(username, 100)
-
-    def set_volume(self, username: str, level: int) -> None:
-        """Set playback volume for username, clamped to [0, 200]."""
-        self._per_user_volume[username] = max(0, min(200, level))
 
     # ── Capture ───────────────────────────────────────────────────────────────
 
@@ -409,7 +350,7 @@ class AudioEngine:
         return self._compute_rms(indata) >= self._vad_threshold
 
     def _input_callback(self, indata, frames, time_info, status) -> None:
-        """Called by sounddevice in its audio thread."""
+        """Called by sounddevice in its audio thread (VAD mode only)."""
         if self._loop is not None and (self._vad_active or self._energy_callback is not None):
             rms = self._compute_rms(indata)
             if self._vad_active and self._vad_callback is not None:
@@ -420,118 +361,13 @@ class AudioEngine:
             if self._energy_callback is not None:
                 self._loop.call_soon_threadsafe(self._energy_callback, rms)
 
-        # Run spectral NS on every frame — even when not transmitting — so the
-        # noise model stays warm and is ready the moment PTT is pressed.
-        # indata has shape (frame_size, 1) from sounddevice; squeeze to (frame_size,).
-        # Cost: ~0.3 ms per frame at 50 fps ≈ 1.5 % CPU — acceptable.
+        # Noise suppressor: run on every frame so the model stays warm.
         if self._suppressor is not None and self._loop is not None and self.noise_suppression_enabled:
             pcm_filtered = self._suppressor.process(indata[:, 0])
-        else:
-            pcm_filtered = None   # NS unavailable or disabled; fall back to raw bytes below
-
-        # Resolve the "best" PCM bytes for this frame (NS-filtered or raw).
-        if pcm_filtered is not None:
             pcm_bytes = pcm_filtered.tobytes()
         else:
             pcm_bytes = indata.tobytes()
 
-        # Loopback: route captured audio straight to the playback queue.
-        if self.loopback_enabled and self._loop is not None:
-            self._loop.call_soon_threadsafe(
-                self._play_queue.put_nowait, (CODEC_RAW, pcm_bytes, "")
-            )
-
         # Spectrum callback for visualisation (e.g. MicTestScreen).
         if self._spectrum_callback is not None and self._loop is not None:
             self._loop.call_soon_threadsafe(self._spectrum_callback, pcm_bytes)
-
-        if self._transmitting and self._loop is not None and self._send_queue is not None:
-            if ADPCM_AVAILABLE:
-                audio_bytes = _adpcm_encode(pcm_bytes)
-                codec = CODEC_ADPCM
-            else:
-                audio_bytes = pcm_bytes
-                codec = CODEC_RAW
-            packed = voice_protocol.pack_c2s(self._send_channel, audio_bytes, codec)
-            self._loop.call_soon_threadsafe(self._send_queue.put_nowait, packed)
-
-    # ── Playback ──────────────────────────────────────────────────────────────
-
-    def play(self, audio_bytes: bytes, codec: int = CODEC_RAW, username: str = "") -> None:
-        """Queue audio for playback.  Returns instantly — never blocks.
-
-        ADPCM decode happens in the background playback thread, not here,
-        so this method only does a queue.put_nowait() and returns in nanoseconds.
-        username is forwarded to the playback worker for per-user gain lookup.
-        """
-        if not AUDIO_AVAILABLE:
-            return
-        try:
-            self._play_queue.put_nowait((codec, audio_bytes, username))
-        except queue.Full:
-            pass  # drop-newest: discard incoming frame, keep buffered audio intact
-
-    def _decode_frame(self, codec: int, audio_bytes: bytes, username: str):
-        """Decode one queued frame and apply per-user gain. Returns int16 ndarray."""
-        if ADPCM_AVAILABLE and codec == CODEC_ADPCM:
-            pcm_bytes = _adpcm_decode(audio_bytes)
-        else:
-            pcm_bytes = audio_bytes
-        audio = np.frombuffer(pcm_bytes, dtype=np.int16)
-        level = self._per_user_volume.get(username, 100)
-        if level != 100:
-            audio = np.clip(
-                audio.astype(np.float32) * (level / 100.0),
-                -32768, 32767,
-            ).astype(np.int16)
-        return audio
-
-    def _playback_worker(self) -> None:
-        """
-        Background thread: owns a single continuous OutputStream.
-
-        Jitter buffer: accumulate _jitter_buffer_frames frames before starting
-        playback, then drain at a fixed 20 ms clock.  On underrun, return to
-        the pre-fill gate.  This absorbs variable network inter-packet delay
-        without playing back the timing variance as audible stutter.
-        """
-        try:
-            with sd.OutputStream(
-                samplerate=_SAMPLERATE,
-                channels=_CHANNELS,
-                dtype=_DTYPE,
-                latency="low",
-            ) as out_stream:
-                while True:
-                    # ── Pre-fill gate ────────────────────────────────────────
-                    # Block until _jitter_buffer_frames frames are ready.
-                    prefill: list = []
-                    while len(prefill) < self._jitter_buffer_frames:
-                        item = self._play_queue.get()
-                        if item is None:          # sentinel → shut down
-                            return
-                        prefill.append(item)
-
-                    # ── Drain loop at fixed 20 ms clock ─────────────────────
-                    next_tick = time.perf_counter()
-                    for item in prefill:
-                        codec, audio_bytes, username = item
-                        out_stream.write(self._decode_frame(codec, audio_bytes, username))
-                        next_tick += _FRAME_SECONDS
-
-                    while True:
-                        try:
-                            item = self._play_queue.get(timeout=_FRAME_SECONDS * 15)
-                        except queue.Empty:
-                            # Underrun — go back to pre-fill gate
-                            break
-                        if item is None:          # sentinel → shut down
-                            return
-                        codec, audio_bytes, username = item
-                        sleep_for = next_tick - time.perf_counter()
-                        if sleep_for > 0:
-                            time.sleep(sleep_for)
-                        out_stream.write(self._decode_frame(codec, audio_bytes, username))
-                        next_tick += _FRAME_SECONDS
-        except Exception:
-            log.exception("Playback worker crashed")

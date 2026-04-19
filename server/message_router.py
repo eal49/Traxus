@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -8,7 +7,6 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
-from shared import voice_protocol
 
 if TYPE_CHECKING:
     from server.connection_manager import ConnectedClient, ConnectionManager
@@ -43,6 +41,9 @@ class MessageRouter:
             C2S.PING:          self._handle_ping,
             C2S.VOICE_JOIN:    self._handle_voice_join,
             C2S.VOICE_LEAVE:   self._handle_voice_leave,
+            C2S.VOICE_OFFER:   self._handle_voice_signal,
+            C2S.VOICE_ANSWER:  self._handle_voice_signal,
+            C2S.VOICE_ICE:     self._handle_voice_signal,
             C2S.PIN_MESSAGE:   self._handle_pin_message,
         }
 
@@ -409,33 +410,20 @@ class MessageRouter:
         log.info("PIN   #%s msg_id=%s by %s", channel, msg_id, client.username)
         return client
 
+    async def _handle_voice_signal(self, payload, ws, client):
+        """Relay voice_offer / voice_answer / voice_ice to the named peer."""
+        to_user = str(payload.get("to_user", "")).strip()
+        target = self._conn.get_client_by_username(to_user)
+        if target is None:
+            return client  # target gone — drop silently
+
+        # Overwrite from_user with the authenticated sender to prevent spoofing.
+        relay = {**payload, "from_user": client.username}
+        await self._conn.send_to(target.user_id, relay)
+        return client
+
     async def relay_voice(self, frame: bytes, ws: object, client: "ConnectedClient") -> None:
-        """Relay a binary audio frame to other voice channel members."""
-        try:
-            n = frame[0]
-            channel = frame[1:1 + n].decode()
-        except Exception:
-            return  # malformed frame — drop silently
-
-        username_bytes = client.username.encode()
-        s2c_frame = voice_protocol.pack_c2s(channel, frame[1 + n:])
-        # Prepend username: rebuild as S2C frame
-        ch_bytes = channel.encode()
-        s2c_frame = (
-            bytes([len(ch_bytes)]) + ch_bytes +
-            bytes([len(username_bytes)]) + username_bytes +
-            frame[1 + n:]
-        )
-
-        receivers = [
-            vc for vc in self._conn.voice_clients_in_channel(channel)
-            if vc.ws is not ws
-        ]
-        if receivers:
-            await asyncio.gather(
-                *[vc.ws.send(s2c_frame) for vc in receivers],
-                return_exceptions=True,
-            )
+        """Binary audio relay — no-op. Audio is now transported via WebRTC."""
 
     # ── Disconnect cleanup ────────────────────────────────────────────────────
 

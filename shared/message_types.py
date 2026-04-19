@@ -20,6 +20,9 @@ class C2S:
     PING          = "ping"
     VOICE_JOIN    = "voice_join"
     VOICE_LEAVE   = "voice_leave"
+    VOICE_OFFER   = "voice_offer"
+    VOICE_ANSWER  = "voice_answer"
+    VOICE_ICE     = "voice_ice"
     PIN_MESSAGE   = "pin_message"
     UNPIN_MESSAGE = "unpin_message"
 
@@ -40,6 +43,9 @@ class S2C:
     ERROR           = "error"
     PONG            = "pong"
     VOICE_STATE     = "voice_state"
+    VOICE_OFFER     = "voice_offer"
+    VOICE_ANSWER    = "voice_answer"
+    VOICE_ICE       = "voice_ice"
     PIN_ADDED       = "pin_added"
 
 

@@ -95,7 +95,7 @@ class MicTestScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         try:
-            if self.app._audio_engine.transmitting:  # type: ignore[attr-defined]
+            if self.app._transmitting:  # type: ignore[attr-defined]
                 self.app.stop_ptt()  # type: ignore[attr-defined]
         except Exception:
             pass
@@ -105,7 +105,6 @@ class MicTestScreen(ModalScreen[None]):
             engine.set_energy_callback(self._on_energy)
             engine.set_spectrum_callback(self._on_spectrum)
             engine.start_vad(loop, threshold=0.0, callback=self._noop_vad)
-            engine.set_loopback(True)
         except Exception:
             pass
         self._refresh_ns_label()
@@ -116,7 +115,6 @@ class MicTestScreen(ModalScreen[None]):
     def on_unmount(self) -> None:
         try:
             engine = self.app._audio_engine  # type: ignore[attr-defined]
-            engine.set_loopback(False)
             engine.set_spectrum_callback(None)
             engine.stop_vad()
         except Exception:
@@ -196,19 +194,19 @@ class MicTestScreen(ModalScreen[None]):
 
     def _refresh_loopback_label(self) -> None:
         try:
-            engine = self.app._audio_engine  # type: ignore[attr-defined]
-            lb_on = getattr(engine, "loopback_enabled", False)
-            label = "[green]Loopback: On[/green]" if lb_on else "Loopback: Off"
-            self.query_one("#loopback-status", Label).update(label)
+            self.query_one("#loopback-status", Label).update(
+                "Loopback: Off (audio is WebRTC)"
+            )
         except Exception:
             pass
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def action_toggle_loopback(self) -> None:
+        # Loopback is not supported in the WebRTC audio pipeline.
         try:
-            engine = self.app._audio_engine  # type: ignore[attr-defined]
-            engine.set_loopback(not engine.loopback_enabled)
-            self._refresh_loopback_label()
+            self.query_one("#loopback-status", Label).update(
+                "Loopback: Off (audio is WebRTC)"
+            )
         except Exception:
             pass

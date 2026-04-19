@@ -368,51 +368,43 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
 
     async def test_f9_sets_transmitting_true_when_in_voice_channel(self):
         """First F9 press while in a voice channel enables PTT."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
 
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
-                app._audio_engine.start = MagicMock()
-                app._audio_engine.set_send_target = MagicMock()
-
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
             self.assertTrue(
-                app._audio_engine.transmitting,
-                "F9 must set transmitting=True (PTT on); "
+                app._transmitting,
+                "F9 must set _transmitting=True (PTT on); "
                 "if this fails, priority=True is missing or not working",
             )
 
     async def test_f9_sets_transmitting_false_on_second_press(self):
         """Second F9 press while transmitting disables PTT."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
 
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
-                app._audio_engine.start = MagicMock()
-                app._audio_engine.stop = MagicMock()
-
-                app._audio_engine.set_send_target = MagicMock()
-
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
                 await pilot.press("f9")
                 await pilot.pause()
 
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
     async def test_f9_updates_status_bar_ptt_indicator(self):
         """F9 must update the PTT indicator in the status bar."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from client.widgets.status_bar import StatusBar
 
         app = TraxusApp()
@@ -420,10 +412,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
             await self._on_chat(app, pilot)
             app.current_voice_channel = "lounge"
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
-                app._audio_engine.start = MagicMock()
-                app._audio_engine.set_send_target = MagicMock()
-
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
@@ -448,7 +437,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
             mv = app.screen.query_one("#messages", MessageView)
             before = _line_count(mv)
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
@@ -456,7 +445,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
                 _line_count(mv), before,
                 "F9 without a voice channel must print an error to the message view",
             )
-            self.assertFalse(app._audio_engine.transmitting)
+            self.assertFalse(app._transmitting)
 
     async def test_f9_fires_even_when_input_is_focused(self):
         """
@@ -464,7 +453,7 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
         or a special key Input handles), so it bubbles up to the App's on_key
         handler and triggers PTT even when the Input widget has focus.
         """
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from textual.widgets import Input
 
         app = TraxusApp()
@@ -476,15 +465,12 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
             app.screen.query_one("#message-input", Input).focus()
             await pilot.pause()
 
-            with patch("client.app.AUDIO_AVAILABLE", True):
-                app._audio_engine.start = MagicMock()
-                app._audio_engine.set_send_target = MagicMock()
-
+            with patch("client.app.WEBRTC_AVAILABLE", True):
                 await pilot.press("f9")
                 await pilot.pause()
 
             self.assertTrue(
-                app._audio_engine.transmitting,
+                app._transmitting,
                 "F9 must fire even when the Input widget has focus; "
                 "the App-level on_key handler must receive the bubbled event",
             )
@@ -675,7 +661,7 @@ class TestVleaveClientBehaviour(unittest.IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
             app.current_voice_channel = "lounge"
-            app._audio_engine.transmitting = True
+            app._transmitting = True
             await pilot.pause()
 
             stop_calls: list[int] = []

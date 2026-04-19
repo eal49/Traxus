@@ -1,5 +1,8 @@
-## ADDED Requirements
+# message-line-selection Specification
 
+## Purpose
+TBD - created by archiving change message-line-selection. Update Purpose after archive.
+## Requirements
 ### Requirement: MessageView maintains a parallel payload store
 `MessageView` SHALL store a `_payloads: list[dict | None]` in lockstep with its `_lines` list, where each entry is the raw server payload for that line or `None` for system/local messages.
 
@@ -63,3 +66,4 @@ Pressing Escape while in selection mode SHALL exit selection mode cleanly.
 - **THEN** selection mode SHALL be deactivated with no command action taken
 - **THEN** the InputBar SHALL regain focus with its previous content restored (empty if it was empty)
 - **THEN** the cursor highlight SHALL be removed from the message view
+

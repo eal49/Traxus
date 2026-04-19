@@ -19,7 +19,7 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.reactive import reactive
 
-from client.audio_engine import AUDIO_AVAILABLE, AudioEngine
+from client.audio_engine import AUDIO_AVAILABLE, WEBRTC_AVAILABLE, AudioEngine
 from client.commands import HELP_TEXT, ParsedCommand, parse_input
 from client.screens.login_screen import LoginScreen
 from client.widgets.input_bar import InputBar
@@ -105,24 +105,31 @@ class TraxusApp(App):
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
         self._selection_command: str | None = None
+        self._peer_manager = None  # PeerManager | None, created on vjoin
+        self._transmitting: bool = False
         from client.settings import load_settings
         settings = load_settings()
-        self._audio_engine: AudioEngine = AudioEngine(
-            jitter_buffer_frames=int(settings.get("jitter_buffer_frames", 3))
-        )
+        self._audio_engine: AudioEngine = AudioEngine()
+        self._stun_server: str = settings.get("stun_server", "stun:stun.l.google.com:19302")
+        self._noise_suppression: bool = bool(settings.get("noise_suppression", True))
         self._ptt_key: str = settings.get("ptt_key", "f9")
         self._ptt_mode: str = settings.get("ptt_mode", "toggle")
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
         self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
-        self._audio_engine.noise_suppression_enabled = bool(settings.get("noise_suppression", True))
+        self._audio_engine.noise_suppression_enabled = self._noise_suppression
         self._nick_color: str = settings.get("nick_color", "")
         self.push_screen(LoginScreen())
+
+    async def on_unmount(self) -> None:
+        if self._peer_manager is not None:
+            await self._peer_manager.close_all()
+            self._peer_manager = None
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
 
     def connect_to_server(self, server_url: str, username: str) -> None:
         self.username = username
-        self._ws_worker = WsWorker(self, audio_engine=self._audio_engine)
+        self._ws_worker = WsWorker(self)
         self.run_worker(
             self._ws_worker.run(server_url, username),
             exclusive=True,
@@ -192,8 +199,8 @@ class TraxusApp(App):
                     self._local("/vcreate <channel-name>")
 
             case "vjoin":
-                if not AUDIO_AVAILABLE:
-                    self._local("Voice not available: sounddevice/numpy not installed.")
+                if not WEBRTC_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy/aiortc not installed.")
                     return
                 if cmd.args:
                     ch = cmd.args[0].lstrip("#")
@@ -202,8 +209,8 @@ class TraxusApp(App):
                     self._local("/vjoin <channel>")
 
             case "vleave":
-                if not AUDIO_AVAILABLE:
-                    self._local("Voice not available: sounddevice/numpy not installed.")
+                if not WEBRTC_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy/aiortc not installed.")
                     return
                 ch = cmd.args[0].lstrip("#") if cmd.args else self.current_voice_channel
                 if ch:
@@ -280,8 +287,8 @@ class TraxusApp(App):
                 self._local("Type /pin followed by a space to enter line-selection mode.")
 
             case "audiotest":
-                if not AUDIO_AVAILABLE or not _NUMPY_AVAILABLE:
-                    self._local("Voice not available: sounddevice/numpy not installed.")
+                if not WEBRTC_AVAILABLE:
+                    self._local("Voice not available: sounddevice/numpy/aiortc not installed.")
                 elif not self._ws_worker:
                     self._local("Not connected.")
                 elif not self.current_voice_channel:
@@ -310,7 +317,7 @@ class TraxusApp(App):
         if event.key == self._ptt_key:
             event.stop()
             if self._ptt_mode == "hold" and not self._ptt_key.startswith("mouse"):
-                if not self._audio_engine.transmitting:
+                if not self._transmitting:
                     self.start_ptt()
                     self._arm_ptt_debounce(PTT_HOLD_INITIAL_DEBOUNCE_MS)
                 else:
@@ -343,60 +350,106 @@ class TraxusApp(App):
         self.toggle_ptt()
 
     def toggle_ptt(self) -> None:
-        if self._audio_engine.transmitting:
+        if self._transmitting:
             self.stop_ptt()
         else:
             self.start_ptt()
 
     def start_ptt(self) -> None:
-        if not AUDIO_AVAILABLE:
-            self._local("Voice not available: sounddevice/numpy not installed.")
+        if not WEBRTC_AVAILABLE:
+            self._local("Voice not available: sounddevice/numpy/aiortc not installed.")
             return
         if not self.current_voice_channel:
             self._local("Join a voice channel first with /vjoin <channel>.")
             return
-        if self._audio_engine.transmitting:
+        if self._transmitting:
             return
-        self._audio_engine.transmitting = True
+        self._transmitting = True
+        if self._peer_manager is not None:
+            self._peer_manager.mic_track.set_transmitting(True)
         chat = self._chat()
         if chat:
             chat.update_ptt(True)
-        loop = asyncio.get_running_loop()
-        self._audio_engine.start(loop)
-        if self._ws_worker is not None:
-            self._audio_engine.set_send_target(
-                self._ws_worker._binary_send_queue,
-                self.current_voice_channel,
-            )
 
     def stop_ptt(self) -> None:
-        if not self._audio_engine.transmitting:
+        if not self._transmitting:
             return
         self._cancel_ptt_debounce()
-        self._audio_engine.transmitting = False
-        self._audio_engine.set_send_target(None, "")
-        # In VAD mode the stream stays open (managed by _exit_vad_listening).
-        if self._ptt_mode != "vad":
-            self._audio_engine.stop()
+        self._transmitting = False
+        if self._peer_manager is not None:
+            self._peer_manager.mic_track.set_transmitting(False)
         chat = self._chat()
         if chat:
             chat.update_ptt(False)
 
+    async def _handle_voice_state_webrtc(
+        self, channel: str, users: list, prev_channel: str
+    ) -> None:
+        """Create/destroy PeerManager and connect to new peers on voice_state."""
+        import sounddevice as sd
+        from client.mic_track import MicTrack
+        from client.peer_manager import PeerManager
+        from client.settings import load_settings
+
+        local_user = self.username
+        new_usernames = {u["username"] for u in users if u["username"] != local_user}
+        joined_voice = bool(channel) and not bool(prev_channel)
+        left_voice = not bool(channel) and bool(prev_channel)
+
+        if joined_voice and self._peer_manager is None:
+            loop = asyncio.get_running_loop()
+            out_stream = sd.OutputStream(
+                samplerate=16000, channels=1, dtype="int16", latency="low"
+            )
+            out_stream.start()
+            mic = MicTrack(loop)
+            mic.noise_suppression_enabled = self._noise_suppression
+            self._peer_manager = PeerManager(
+                mic_track=mic,
+                out_stream=out_stream,
+                ws_worker=self._ws_worker,  # type: ignore[arg-type]
+                stun_url=self._stun_server,
+            )
+            for uname in new_usernames:
+                await self._peer_manager.connect(uname)
+        elif left_voice and self._peer_manager is not None:
+            await self._peer_manager.close_all()
+            self._peer_manager = None
+            self._transmitting = False
+        elif self._peer_manager is not None:
+            # Channel unchanged: connect to newly arrived peers
+            existing = set(self._peer_manager._peers.keys())
+            for uname in new_usernames - existing:
+                await self._peer_manager.connect(uname)
+            for uname in existing - new_usernames:
+                await self._peer_manager.disconnect(uname)
+
     async def _audio_test_task(self) -> None:
-        from shared.voice_protocol import pack_c2s
-        from shared.adpcm import CODEC_RAW
         self._audio_test_running = True
         try:
-            channel = self.current_voice_channel
+            if self._peer_manager is None:
+                self._local("Join a voice channel first.")
+                return
             self._local("Audio test: sending 10 tones...")
-            queue = self._ws_worker._binary_send_queue  # type: ignore[union-attr]
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            frame_count = 0
             for freq in _AUDIO_TEST_FREQS:
                 tone = _apply_taper(_gen_tone(freq, 1.0))
                 for offset in range(0, len(tone), 320):
-                    frame = tone[offset:offset + 320]
-                    packed = pack_c2s(channel, frame.tobytes(), CODEC_RAW)
-                    queue.put_nowait(packed)
-                    await asyncio.sleep(0.020)
+                    frame_samples = tone[offset:offset + 320]
+                    # Inject directly into MicTrack queue so it flows via WebRTC
+                    try:
+                        self._peer_manager.mic_track._queue.put_nowait(
+                            frame_samples.tobytes()
+                        )
+                    except Exception:
+                        pass
+                    frame_count += 1
+                    target = start + frame_count * 0.020
+                    delay = target - loop.time()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             self._local("Audio test complete.")
         finally:
             self._audio_test_running = False
@@ -439,7 +492,7 @@ class TraxusApp(App):
         """Called from the asyncio loop when VAD detects a voice/silence transition."""
         if is_voice:
             self._cancel_vad_hangover()
-            if not self._audio_engine.transmitting:
+            if not self._transmitting:
                 self.start_ptt()
         else:
             self._arm_vad_hangover()
@@ -579,6 +632,38 @@ class TraxusApp(App):
                         self._enter_vad_listening()
                     elif not self.current_voice_channel and prev_channel:
                         self._exit_vad_listening()
+                # WebRTC peer lifecycle
+                if WEBRTC_AVAILABLE:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self._handle_voice_state_webrtc(
+                        channel, users, prev_channel
+                    ))
+
+            case S2C.VOICE_OFFER:
+                if self._peer_manager is not None:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self._peer_manager.on_offer(
+                        payload.get("from_user", ""),
+                        payload.get("sdp", ""),
+                    ))
+
+            case S2C.VOICE_ANSWER:
+                if self._peer_manager is not None:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self._peer_manager.on_answer(
+                        payload.get("from_user", ""),
+                        payload.get("sdp", ""),
+                    ))
+
+            case S2C.VOICE_ICE:
+                if self._peer_manager is not None:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self._peer_manager.on_ice(
+                        payload.get("from_user", ""),
+                        payload.get("candidate"),
+                        payload.get("sdpMid", "0"),
+                        payload.get("sdpMLineIndex", 0),
+                    ))
 
             case "pin_added":
                 if chat:
@@ -636,7 +721,7 @@ class TraxusApp(App):
             chat.update_voice_channel(name)
         if not name:
             # Stopped being in a voice channel — halt any active audio.
-            if getattr(self._audio_engine, "transmitting", False):
+            if self._transmitting:
                 self.stop_ptt()
             if self._ptt_mode == "vad":
                 self._exit_vad_listening()

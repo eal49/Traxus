@@ -55,9 +55,6 @@ python3 -m venv .venv
 .venv/bin/pip install -r deploy/requirements-server.txt
 ```
 
-> **Note:** `numpy` is required for IMA ADPCM audio compression (`shared/adpcm.py`).
-> It is listed in `requirements-server.txt` and installed automatically by the command above.
-
 Verify the server starts:
 
 ```bash
@@ -204,6 +201,66 @@ If `websocat` is not available, a quick curl test confirms port 443 is open:
 curl -I https://YOUR-NAME.duckdns.org
 # Expect: HTTP/2 426 (Upgrade Required — the server expects a WebSocket upgrade, not HTTP)
 ```
+
+---
+
+## 8. WebRTC Audio — NAT Traversal Notes
+
+Voice audio in Traxus is **peer-to-peer via WebRTC**. The server only relays JSON signaling messages (`voice_offer`, `voice_answer`, `voice_ice`); audio never passes through the VPS. This means:
+
+- No audio-related bandwidth or CPU load on the server.
+- No extra ports need to be opened on the server firewall.
+
+Clients use the default STUN server (`stun:stun.l.google.com:19302`) to discover their public IP and negotiate a direct connection. This works for most NAT configurations (full-cone, port-restricted, address-restricted).
+
+### When STUN is not enough
+
+If two clients are both behind **strict symmetric NAT** (common on some corporate or mobile networks), STUN cannot establish a direct path and the WebRTC connection will fail silently — the users will hear nothing.
+
+The fix is a **TURN server**, which relays audio when direct P2P is impossible. A minimal self-hosted option is [coturn](https://github.com/coturn/coturn):
+
+```bash
+sudo apt install -y coturn
+```
+
+Edit `/etc/turnserver.conf`:
+
+```
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+lt-cred-mech
+user=traxus:YOUR_TURN_PASSWORD
+realm=YOUR-NAME.duckdns.org
+cert=/path/to/fullchain.pem
+pkey=/path/to/privkey.pem
+```
+
+Open the additional ports in your firewall:
+
+```bash
+sudo ufw allow 3478/tcp
+sudo ufw allow 3478/udp
+sudo ufw allow 5349/tcp
+sudo ufw allow 5349/udp
+sudo ufw allow 49152:65535/udp   # TURN relay range
+```
+
+Enable and start:
+
+```bash
+sudo systemctl enable --now coturn
+```
+
+Each client then sets `stun_server` in `~/.traxus/settings.json` to the TURN URL:
+
+```json
+{
+  "stun_server": "turn:traxus:YOUR_TURN_PASSWORD@YOUR-NAME.duckdns.org:3478"
+}
+```
+
+> **Note:** TURN relay adds latency and server bandwidth proportional to the number of active voice pairs that cannot connect directly. For small private servers this is usually negligible.
 
 ---
 

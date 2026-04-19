@@ -139,6 +139,14 @@ class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
 
 # ── Volume bar and keyboard interaction tests ────────────────────────────────
 
+class _MockVolumeSource:
+    def __init__(self):
+        self._v = {}
+    def get_volume(self, u): return self._v.get(u, 100)
+    def set_volume(self, u, v): self._v[u] = max(0, min(200, v))
+    async def close_all(self): pass
+
+
 class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
 
     async def _setup(self):
@@ -147,6 +155,7 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
         pilot = await pilot_ctx.__aenter__()
         await app.switch_screen(ChatScreen())
         await pilot.pause()
+        app._peer_manager = _MockVolumeSource()
         mp = app.screen.query_one("#members", MemberPanel)
         return app, pilot, pilot_ctx, mp
 
@@ -170,9 +179,10 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
+            app._peer_manager = _MockVolumeSource()
             mp = app.screen.query_one("#members", MemberPanel)
             mp.update_voice([{"username": "alice"}])
-            app._audio_engine.set_volume("alice", 40)
+            app._peer_manager.set_volume("alice", 40)
             await pilot.pause()
 
             markup = mp._build_markup()
@@ -203,13 +213,14 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
             mp.update_voice([{"username": "alice"}])
+            app._peer_manager = _MockVolumeSource()
             mp.focus()
             await pilot.pause()
 
             await pilot.press("right")
             await pilot.pause()
 
-            self.assertEqual(app._audio_engine.get_volume("alice"), 110)
+            self.assertEqual(app._peer_manager.get_volume("alice"), 110)
 
     async def test_left_arrow_decreases_volume(self):
         """Pressing ← while MemberPanel is focused must decrease volume by 10."""
@@ -219,13 +230,14 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
             mp.update_voice([{"username": "alice"}])
+            app._peer_manager = _MockVolumeSource()
             mp.focus()
             await pilot.pause()
 
             await pilot.press("left")
             await pilot.pause()
 
-            self.assertEqual(app._audio_engine.get_volume("alice"), 90)
+            self.assertEqual(app._peer_manager.get_volume("alice"), 90)
 
     async def test_left_at_0_does_not_go_below_0(self):
         """Pressing ← when volume is 0 must stay at 0."""
@@ -235,14 +247,15 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
             mp.update_voice([{"username": "alice"}])
-            app._audio_engine.set_volume("alice", 0)
+            app._peer_manager = _MockVolumeSource()
+            app._peer_manager.set_volume("alice", 0)
             mp.focus()
             await pilot.pause()
 
             await pilot.press("left")
             await pilot.pause()
 
-            self.assertEqual(app._audio_engine.get_volume("alice"), 0)
+            self.assertEqual(app._peer_manager.get_volume("alice"), 0)
 
     async def test_right_at_200_does_not_exceed_200(self):
         """Pressing → when volume is 200 must stay at 200."""
@@ -252,14 +265,15 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
             mp.update_voice([{"username": "alice"}])
-            app._audio_engine.set_volume("alice", 200)
+            app._peer_manager = _MockVolumeSource()
+            app._peer_manager.set_volume("alice", 200)
             mp.focus()
             await pilot.pause()
 
             await pilot.press("right")
             await pilot.pause()
 
-            self.assertEqual(app._audio_engine.get_volume("alice"), 200)
+            self.assertEqual(app._peer_manager.get_volume("alice"), 200)
 
     async def test_down_arrow_cycles_cursor(self):
         """Pressing ↓ must move the cursor to the next voice user (wrapping)."""

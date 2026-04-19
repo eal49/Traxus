@@ -1,5 +1,8 @@
-## ADDED Requirements
+# quote-command Specification
 
+## Purpose
+TBD - created by archiving change message-line-selection. Update Purpose after archive.
+## Requirements
 ### Requirement: /quote command is registered
 The client SHALL recognise `/quote` as a known slash command and include it in the help text.
 
@@ -27,3 +30,4 @@ After the user selects a line via the selection cursor, `/quote` SHALL insert an
 #### Scenario: Quote text is not sent automatically
 - **WHEN** the InputBar is populated by /quote
 - **THEN** no message SHALL be sent to the server; the user must press Enter again to send
+

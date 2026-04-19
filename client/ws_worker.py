@@ -21,11 +21,9 @@ import websockets.asyncio.client
 import websockets.exceptions
 
 from shared.message_types import C2S, VERSION
-from shared import voice_protocol
 
 if TYPE_CHECKING:
     from client.app import TraxusApp
-    from client.audio_engine import AudioEngine
 
 log = logging.getLogger("traxus.worker")
 
@@ -42,12 +40,10 @@ class WsWorker:
     so websockets and Textual share the same event loop naturally.
     """
 
-    def __init__(self, app: "TraxusApp", audio_engine: "AudioEngine | None" = None) -> None:
+    def __init__(self, app: "TraxusApp") -> None:
         self._app = app
-        self._audio_engine = audio_engine
         self._ws: websockets.asyncio.client.ClientConnection | None = None
         self._send_queue: asyncio.Queue[str] = asyncio.Queue()
-        self._binary_send_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._running = False
         self._authenticated = False
 
@@ -56,10 +52,6 @@ class WsWorker:
     def enqueue(self, payload: dict) -> None:
         """Queue a message to be sent to the server. Safe from any sync handler."""
         self._send_queue.put_nowait(json.dumps(payload))
-
-    def enqueue_binary(self, data: bytes) -> None:
-        """Queue raw bytes to be sent as a binary frame."""
-        self._binary_send_queue.put_nowait(data)
 
     def notify_auth_ok(self) -> None:
         """Called by the app when auth_ok is received; enables reconnect on future drops."""
@@ -130,13 +122,7 @@ class WsWorker:
     ) -> None:
         async for raw in ws:
             if isinstance(raw, bytes):
-                if self._audio_engine is not None:
-                    try:
-                        _ch, _user, codec, audio_bytes = voice_protocol.unpack_s2c(raw)
-                        self._audio_engine.play(audio_bytes, codec, _user)
-                    except Exception:
-                        pass
-                continue
+                continue  # binary frames not used — audio is WebRTC RTP
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
@@ -148,27 +134,12 @@ class WsWorker:
     async def _send_loop(
         self, ws: websockets.asyncio.client.ClientConnection
     ) -> None:
-        text_get = asyncio.ensure_future(self._send_queue.get())
-        bin_get  = asyncio.ensure_future(self._binary_send_queue.get())
-        try:
-            while True:
-                done, _ = await asyncio.wait(
-                    {text_get, bin_get},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                try:
-                    for fut in done:
-                        data = fut.result()
-                        await ws.send(data)
-                        if fut is text_get:
-                            text_get = asyncio.ensure_future(self._send_queue.get())
-                        else:
-                            bin_get = asyncio.ensure_future(self._binary_send_queue.get())
-                except websockets.exceptions.WebSocketException:
-                    break
-        finally:
-            text_get.cancel()
-            bin_get.cancel()
+        while True:
+            try:
+                data = await self._send_queue.get()
+                await ws.send(data)
+            except websockets.exceptions.WebSocketException:
+                break
 
     async def _ping_loop(
         self, ws: websockets.asyncio.client.ClientConnection

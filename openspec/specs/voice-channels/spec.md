@@ -1,3 +1,5 @@
+## Requirements
+
 ### Requirement: Channel type field
 Every channel SHALL carry a `type` field with value `"text"` or `"voice"`. Existing channels bootstrapped at startup (general, random, dev) SHALL default to `"text"`. The `/vcreate` command creates channels with `type: "voice"`.
 
@@ -12,7 +14,7 @@ Every channel SHALL carry a `type` field with value `"text"` or `"voice"`. Exist
 ---
 
 ### Requirement: Voice channel membership tracking
-The server SHALL maintain a separate voice membership set per voice channel, independent of text channel subscriptions. A client MAY be subscribed to a text channel and simultaneously joined to a voice channel with the same name.
+The server SHALL maintain a separate voice membership set per voice channel, independent of text channel subscriptions. A client MAY be subscribed to a text channel and simultaneously joined to a voice channel with the same name. The server SHALL NOT relay binary audio frames between voice channel members; it SHALL only relay WebRTC signaling messages (`voice_offer`, `voice_answer`, `voice_ice`) between named peers in the same voice channel.
 
 #### Scenario: Voice join adds to voice members
 - **WHEN** a client sends `C2S voice_join { channel: "lounge" }`
@@ -26,6 +28,11 @@ The server SHALL maintain a separate voice membership set per voice channel, ind
 - **WHEN** a WebSocket connection closes
 - **THEN** the client is removed from all voice channels they were in
 
+#### Scenario: Server does not relay binary audio frames
+- **WHEN** a binary WebSocket frame arrives from an authenticated client
+- **THEN** the server SHALL drop the frame silently
+- **THEN** no binary frame SHALL be forwarded to any other client
+
 ---
 
 ### Requirement: voice_state broadcast
@@ -38,23 +45,6 @@ After any voice join or voice leave the server SHALL send `S2C voice_state` to a
 #### Scenario: voice_state sent on leave
 - **WHEN** client A leaves voice channel `#lounge`
 - **THEN** remaining voice members receive an updated `S2C voice_state` without client A
-
----
-
-### Requirement: Binary audio frame relay
-The server SHALL relay binary audio frames from a transmitting client to all other voice members of the target channel. The server SHALL NOT echo the frame back to the sender. Clients that are not voice members of that channel SHALL NOT receive the frame.
-
-#### Scenario: Frame relayed to voice members
-- **WHEN** client A (in voice channel `#lounge`) sends a binary frame with channel header `lounge`
-- **THEN** all other voice members of `#lounge` receive the frame with username header prepended
-
-#### Scenario: Non-member does not receive frame
-- **WHEN** client A sends a binary frame for `#lounge`
-- **THEN** client B, who is NOT a voice member of `#lounge`, does NOT receive the frame
-
-#### Scenario: Sender does not receive own frame
-- **WHEN** client A sends a binary frame
-- **THEN** client A does NOT receive that same frame back
 
 ---
 

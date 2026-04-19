@@ -40,12 +40,13 @@ class MemberPanel(Widget):
         self._cursor: int = 0
         self._panel_width: int = _MIN_WIDTH
 
-    # ── AudioEngine access (same pattern as SettingsScreen) ───────────────────
+    # ── Volume source: PeerManager (WebRTC) ──────────────────────────────────
 
     @property
-    def _audio_engine(self):
+    def _volume_source(self):
+        """Return PeerManager if in a voice channel, else None."""
         try:
-            return getattr(self.app, "_audio_engine", None)
+            return getattr(self.app, "_peer_manager", None)
         except Exception:
             return None
 
@@ -64,7 +65,7 @@ class MemberPanel(Widget):
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _volume_bar(self, username: str) -> str:
-        engine = self._audio_engine
+        engine = self._volume_source
         level = engine.get_volume(username) if engine is not None else 100
         filled = round(level / 20)          # 0%→0, 100%→5, 200%→10
         bar = "█" * filled + "░" * (10 - filled)
@@ -133,7 +134,7 @@ class MemberPanel(Widget):
             self.refresh()
         elif event.key in ("left", "right"):
             event.stop()
-            engine = self._audio_engine
+            engine = self._volume_source
             if engine is None:
                 return
             username = self._sorted_voice_users[self._cursor]

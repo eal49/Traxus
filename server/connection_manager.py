@@ -50,6 +50,10 @@ class ConnectionManager:
     def is_nick_taken(self, username: str) -> bool:
         return username in self._nick_to_id
 
+    def get_client_by_username(self, username: str) -> ConnectedClient | None:
+        user_id = self._nick_to_id.get(username)
+        return self._clients.get(user_id) if user_id else None
+
     def clients_in_channel(self, channel: str) -> list[ConnectedClient]:
         return [c for c in self._clients.values() if channel in c.channels]
 

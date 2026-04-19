@@ -51,9 +51,6 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
         """
         app = TraxusApp()
 
-        # Prevent sounddevice from opening a real microphone stream.
-        app_start_mock = MagicMock()
-
         async with app.run_test(size=(120, 40)) as pilot:
 
             # ── 1. Login screen ───────────────────────────────────────────────
@@ -80,15 +77,13 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
             # sounddevice may not be installed in the test's Python environment;
             # without this patch, /vjoin and F9 both bail out early with
             # "Voice not available" and nothing is sent to the server.
-            with patch("client.app.AUDIO_AVAILABLE", True):
+            with patch("client.app.WEBRTC_AVAILABLE", True):
 
                 # ── 2. Create voice channel ───────────────────────────────────
                 app.handle_input("/vcreate lounge")
                 await pilot.pause(0.5)
 
                 # ── 3. Join voice channel ─────────────────────────────────────
-                app._audio_engine.start = app_start_mock
-                app._audio_engine.set_send_target = MagicMock()
                 # Ensure toggle mode regardless of system settings file.
                 app._ptt_mode = "toggle"
 
@@ -119,8 +114,8 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
 
                 # ── 5. Assertions ─────────────────────────────────────────────
                 self.assertTrue(
-                    app._audio_engine.transmitting,
-                    "app._audio_engine.transmitting must be True after F9 — "
+                    app._transmitting,
+                    "app._transmitting must be True after F9 — "
                     "priority=True binding or action_ptt_toggle wiring is broken",
                 )
 
@@ -131,14 +126,11 @@ class TestPttEndToEnd(unittest.IsolatedAsyncioTestCase):
                     "toggle_ptt() must call chat.update_ptt(True)",
                 )
 
-                app_start_mock.assert_called_once()   # AudioEngine.start() was called
-
                 # ── 6. F9 again turns PTT off ─────────────────────────────────
-                app._audio_engine.stop = MagicMock()
                 await pilot.press("f9")
                 await pilot.pause(0.3)
 
-                self.assertFalse(app._audio_engine.transmitting, "Second F9 must turn PTT off")
+                self.assertFalse(app._transmitting, "Second F9 must turn PTT off")
                 self.assertFalse(sb._ptt_active, "Status bar must clear ● MIC after PTT off")
 
 
