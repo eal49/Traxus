@@ -25,6 +25,8 @@ _DEFAULTS: dict = {
     "nick_color": "",
     "jitter_buffer_frames": 5,
     "stun_server": "stun:stun.l.google.com:19302",
+    "input_device": None,
+    "output_device": None,
 }
 
 

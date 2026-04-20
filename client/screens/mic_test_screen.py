@@ -96,7 +96,12 @@ class MicTestScreen(ModalScreen[None]):
             engine = self.app._audio_engine  # type: ignore[attr-defined]
             engine.set_energy_callback(self._on_energy)
             engine.set_spectrum_callback(self._on_spectrum)
-            engine.start_vad(loop, threshold=0.0, callback=self._noop_vad)
+            engine.start_vad(
+                loop,
+                threshold=0.0,
+                callback=self._noop_vad,
+                device=getattr(self.app, "_input_device", None),
+            )
         except Exception:
             pass
         self._refresh_loopback_label()

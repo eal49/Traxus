@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -153,6 +153,74 @@ class TestVadCallback(unittest.TestCase):
 
         # Should fire at most once (the state doesn't change on 2nd call)
         self.assertLessEqual(called_with.count(True), 1)
+
+
+class TestAudioEngineDevice(unittest.TestCase):
+
+    @patch("sounddevice.InputStream")
+    def test_start_passes_device_to_input_stream(self, mock_cls):
+        """AudioEngine.start(loop, device='Mic') passes device= to sd.InputStream."""
+        from client.audio_engine import AudioEngine, AUDIO_AVAILABLE
+        if not AUDIO_AVAILABLE:
+            self.skipTest("sounddevice not available")
+        mock_cls.return_value = MagicMock()
+        engine = AudioEngine()
+        loop = MagicMock()
+        engine.start(loop, device="Mic")
+        engine.stop()
+        call_kwargs = mock_cls.call_args_list[0][1]
+        self.assertEqual(call_kwargs.get("device"), "Mic")
+
+    @patch("sounddevice.InputStream")
+    def test_start_no_device_when_none(self, mock_cls):
+        """AudioEngine.start(loop, device=None) does not pass device= to sd.InputStream."""
+        from client.audio_engine import AudioEngine, AUDIO_AVAILABLE
+        if not AUDIO_AVAILABLE:
+            self.skipTest("sounddevice not available")
+        mock_cls.return_value = MagicMock()
+        engine = AudioEngine()
+        loop = MagicMock()
+        engine.start(loop, device=None)
+        engine.stop()
+        call_kwargs = mock_cls.call_args_list[0][1]
+        self.assertNotIn("device", call_kwargs)
+
+    @patch("sounddevice.InputStream")
+    def test_start_vad_passes_device(self, mock_cls):
+        """AudioEngine.start_vad(loop, ..., device='Mic') forwards device= to start()."""
+        from client.audio_engine import AudioEngine, AUDIO_AVAILABLE
+        if not AUDIO_AVAILABLE:
+            self.skipTest("sounddevice not available")
+        mock_cls.return_value = MagicMock()
+        engine = AudioEngine()
+        loop = MagicMock()
+        engine.start_vad(loop, threshold=100.0, callback=lambda v: None, device="Headset")
+        engine.stop()
+        call_kwargs = mock_cls.call_args_list[0][1]
+        self.assertEqual(call_kwargs.get("device"), "Headset")
+
+    @patch("sounddevice.InputStream")
+    def test_start_falls_back_on_bad_device(self, mock_cls):
+        """AudioEngine.start() falls back to system default if device raises."""
+        from client.audio_engine import AudioEngine, AUDIO_AVAILABLE
+        if not AUDIO_AVAILABLE:
+            self.skipTest("sounddevice not available")
+        call_count = 0
+
+        def side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if kwargs.get("device") == "Bad Device":
+                raise ValueError("device not found")
+            return MagicMock()
+
+        mock_cls.side_effect = side_effect
+        engine = AudioEngine()
+        loop = MagicMock()
+        engine.start(loop, device="Bad Device")
+        engine.stop()
+        # First call: device="Bad Device" (raises), second: fallback (no device)
+        self.assertEqual(call_count, 2)
 
 
 if __name__ == "__main__":

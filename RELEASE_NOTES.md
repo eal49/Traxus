@@ -1,3 +1,14 @@
+## What's new in v0.2.2
+
+- **Audio device selection** — choose input and output devices from Settings.
+  The selection persists across sessions and hot-swaps while in a voice channel
+  without requiring a rejoin.
+- **Device hot-swap no longer freezes the UI** — all PortAudio stream
+  open/close and `sd.OutputStream.write()` calls now run off the asyncio event
+  loop thread. Changing devices mid-call is smooth with at most a brief silence.
+- **Device picker opens instantly** — device enumeration runs in a background
+  worker so the list never blocks the UI.
+
 ## What's new in v0.2.1
 
 - **CI fix** — `libportaudio2` is now installed on the Ubuntu test runner before

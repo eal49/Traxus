@@ -1,10 +1,11 @@
 """
-Unit tests for client/remote_audio_sink.py (task 5.4).
+Unit tests for client/remote_audio_sink.py.
 
 Tests:
   - Volume gain is applied correctly at levels other than 100
   - 100% volume leaves PCM unchanged (fast path)
   - Graceful exit when track raises MediaStreamError
+  - Writes go through the out_stream_holder[0] reference
 """
 from __future__ import annotations
 
@@ -43,8 +44,9 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         track = MagicMock()
         out_stream = MagicMock()
         out_stream.write = MagicMock()
+        holder = [out_stream]
         volume_dict = {username: volume_level}
-        return RemoteAudioSink(track, username, out_stream, volume_dict), track, out_stream
+        return RemoteAudioSink(track, username, holder, volume_dict), track, out_stream
 
     async def test_100_percent_leaves_pcm_unchanged(self):
         sink, track, out_stream = self._make_sink(100)
@@ -127,9 +129,8 @@ class TestRemoteAudioSinkExit(unittest.IsolatedAsyncioTestCase):
         track = MagicMock()
         track.recv = AsyncMock(side_effect=aiortc.mediastreams.MediaStreamError())
         out_stream = MagicMock()
-        sink = RemoteAudioSink(track, "bob", out_stream, {})
+        sink = RemoteAudioSink(track, "bob", [out_stream], {})
 
-        # Should complete without raising
         try:
             await asyncio.wait_for(sink.run(), timeout=2.0)
         except asyncio.TimeoutError:
@@ -149,10 +150,68 @@ class TestRemoteAudioSinkExit(unittest.IsolatedAsyncioTestCase):
         track = MagicMock()
         track.recv = AsyncMock(side_effect=recv)
         out_stream = MagicMock()
-        sink = RemoteAudioSink(track, "alice", out_stream, {})
+        sink = RemoteAudioSink(track, "alice", [out_stream], {})
         await sink.run()
 
         self.assertEqual(out_stream.write.call_count, 3)
+
+
+@unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
+class TestRemoteAudioSinkHolder(unittest.IsolatedAsyncioTestCase):
+    """Writes go through holder[0], so swapping the holder swaps the target stream."""
+
+    async def test_write_goes_to_holder_zero(self):
+        """Writes should call holder[0].write, not a stored stream reference."""
+        from client.remote_audio_sink import RemoteAudioSink
+
+        pcm = np.ones(320, dtype=np.int16) * 500
+        frames = [_make_frame(pcm)]
+
+        async def recv():
+            if frames:
+                return frames.pop(0)
+            raise aiortc.mediastreams.MediaStreamError()
+
+        track = MagicMock()
+        track.recv = AsyncMock(side_effect=recv)
+        stream_a = MagicMock()
+        holder = [stream_a]
+        sink = RemoteAudioSink(track, "alice", holder, {})
+        await sink.run()
+
+        self.assertTrue(stream_a.write.called)
+
+    async def test_write_follows_swapped_holder(self):
+        """After swapping holder[0], writes go to the new stream."""
+        from client.remote_audio_sink import RemoteAudioSink
+
+        pcm = np.ones(320, dtype=np.int16) * 500
+        frames = [_make_frame(pcm), _make_frame(pcm)]
+
+        stream_a = MagicMock()
+        stream_b = MagicMock()
+        holder = [stream_a]
+
+        call_count = 0
+
+        async def recv():
+            nonlocal call_count
+            if frames:
+                call_count += 1
+                f = frames.pop(0)
+                if call_count == 1:
+                    # Swap AFTER first frame is returned so first write goes to stream_a,
+                    # second write goes to stream_b.
+                    holder[0] = stream_b
+                return f
+            raise aiortc.mediastreams.MediaStreamError()
+
+        track = MagicMock()
+        track.recv = AsyncMock(side_effect=recv)
+        sink = RemoteAudioSink(track, "alice", holder, {})
+        await sink.run()
+
+        self.assertTrue(stream_b.write.called, "second frame should go to stream_b after swap")
 
 
 if __name__ == "__main__":

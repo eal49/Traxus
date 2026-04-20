@@ -27,16 +27,18 @@ class RemoteAudioSink:
         self,
         track: "AudioStreamTrack",
         username: str,
-        out_stream: "sd.OutputStream",
+        out_stream_holder: list,
         volume_dict: dict[str, int],
     ) -> None:
         self._track = track
         self._username = username
-        self._out_stream = out_stream
+        self._out_stream_holder = out_stream_holder
         self._volume_dict = volume_dict
 
     async def run(self) -> None:
+        import asyncio
         import numpy as np
+        loop = asyncio.get_running_loop()
         try:
             from aiortc.mediastreams import MediaStreamError
         except ImportError:
@@ -62,7 +64,13 @@ class RemoteAudioSink:
                         -32768, 32767,
                     ).astype(np.int16)
 
-                self._out_stream.write(pcm)
+                try:
+                    # Capture stream reference before awaiting so a concurrent
+                    # holder swap picks up the new stream on the next iteration.
+                    stream = self._out_stream_holder[0]
+                    await loop.run_in_executor(None, stream.write, pcm)
+                except Exception:
+                    pass  # stream swapped or stopped; drop this frame
         except MediaStreamError:
             pass  # track ended cleanly
         except Exception:

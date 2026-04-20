@@ -42,23 +42,39 @@ class MicTrack(AudioStreamTrack):
 
     kind = "audio"
 
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        device: "str | None" = None,
+    ) -> None:
         super().__init__()
         self._loop = loop
         self._transmitting: bool = False
+        self._device: "str | None" = device
 
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._pts: int = 0
         self._start: float | None = None  # wall-clock origin for pacing
 
-        self._stream = sd.InputStream(
+        self._stream = self._open_stream(device)
+
+    def _open_stream(self, device: "str | None") -> "sd.InputStream":
+        kwargs: dict = dict(
             samplerate=_SAMPLERATE,
             channels=_CHANNELS,
             dtype=_DTYPE,
             blocksize=_BLOCKSIZE,
             callback=self._input_callback,
         )
-        self._stream.start()
+        if device is not None:
+            kwargs["device"] = device
+        try:
+            stream = sd.InputStream(**kwargs)
+        except Exception:
+            kwargs.pop("device", None)
+            stream = sd.InputStream(**kwargs)
+        stream.start()
+        return stream
 
     # ── PTT gate ──────────────────────────────────────────────────────────────
 
@@ -114,6 +130,16 @@ class MicTrack(AudioStreamTrack):
         frame.time_base = fractions.Fraction(1, _SAMPLERATE)
         self._pts += _BLOCKSIZE
         return frame
+
+    def restart_stream(self, device: "str | None") -> None:
+        """Swap the underlying InputStream for a new device without touching the queue or aiortc track."""
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception:
+            pass
+        self._device = device
+        self._stream = self._open_stream(device)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

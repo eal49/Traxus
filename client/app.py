@@ -116,6 +116,8 @@ class TraxusApp(App):
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
         self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
         self._nick_color: str = settings.get("nick_color", "")
+        self._input_device: "str | None" = settings.get("input_device") or None
+        self._output_device: "str | None" = settings.get("output_device") or None
         self.push_screen(LoginScreen())
 
     async def on_unmount(self) -> None:
@@ -396,11 +398,16 @@ class TraxusApp(App):
 
         if joined_voice and self._peer_manager is None:
             loop = asyncio.get_running_loop()
-            out_stream = sd.OutputStream(
-                samplerate=48000, channels=1, dtype="int16", latency=0.08
-            )
+            _out_kwargs: dict = dict(samplerate=48000, channels=1, dtype="int16", latency=0.08)
+            if self._output_device:
+                _out_kwargs["device"] = self._output_device
+            try:
+                out_stream = sd.OutputStream(**_out_kwargs)
+            except Exception:
+                _out_kwargs.pop("device", None)
+                out_stream = sd.OutputStream(**_out_kwargs)
             out_stream.start()
-            mic = MicTrack(loop)
+            mic = MicTrack(loop, device=self._input_device)
             self._peer_manager = PeerManager(
                 mic_track=mic,
                 out_stream=out_stream,
@@ -807,6 +814,66 @@ class TraxusApp(App):
             "username": payload.get("username", ""),
             "content": payload.get("content", ""),
         })
+
+    # ── Audio device helpers ──────────────────────────────────────────────────
+
+    def _restart_input_device(self, device: "str | None") -> None:
+        from client.settings import load_settings, save_settings
+        self._input_device = device
+        settings = load_settings()
+        settings["input_device"] = device
+        save_settings(settings)
+        if self._peer_manager is not None or (
+            self._ptt_mode == "vad" and self.current_voice_channel
+        ):
+            self.run_worker(self._do_restart_input(device))
+
+    async def _do_restart_input(self, device: "str | None") -> None:
+        loop = asyncio.get_running_loop()
+        if self._peer_manager is not None:
+            try:
+                await loop.run_in_executor(
+                    None, self._peer_manager.mic_track.restart_stream, device
+                )
+            except Exception:
+                pass
+        if self._ptt_mode == "vad" and self.current_voice_channel:
+            self._cancel_vad_hangover()
+            chat = self._chat()
+            if chat:
+                chat.update_vad_listening(False)
+            try:
+                await loop.run_in_executor(None, self._audio_engine.stop_vad)
+            except Exception:
+                pass
+            threshold = self._get_vad_threshold()
+            try:
+                await loop.run_in_executor(
+                    None, self._audio_engine.start_vad, loop, threshold, self._on_vad_state
+                )
+            except Exception:
+                pass
+            if chat:
+                chat.update_vad_listening(True)
+
+    def _restart_output_device(self, device: "str | None") -> None:
+        from client.settings import load_settings, save_settings
+        self._output_device = device
+        settings = load_settings()
+        settings["output_device"] = device
+        save_settings(settings)
+        if self._peer_manager is not None:
+            self.run_worker(self._do_restart_output(device))
+
+    async def _do_restart_output(self, device: "str | None") -> None:
+        loop = asyncio.get_running_loop()
+        if self._peer_manager is not None:
+            try:
+                await loop.run_in_executor(
+                    None, self._peer_manager.restart_output_stream, device
+                )
+            except Exception:
+                pass
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

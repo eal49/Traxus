@@ -141,5 +141,69 @@ class TestMicTrackTransmitGate(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(track._queue.empty(), "Queue must receive a frame when transmitting")
 
 
+@unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
+class TestMicTrackDevice(unittest.IsolatedAsyncioTestCase):
+
+    async def test_device_param_passed_to_input_stream(self):
+        """MicTrack.__init__ with device='My Mic' passes device= to sd.InputStream."""
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop, device="My Mic")
+            track.stop()
+        call_kwargs = mock_cls.call_args_list[0][1]
+        self.assertEqual(call_kwargs.get("device"), "My Mic")
+
+    async def test_no_device_param_when_none(self):
+        """MicTrack.__init__ with device=None does not pass device= to sd.InputStream."""
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop, device=None)
+            track.stop()
+        # device should not be in kwargs (or be None if present)
+        call_kwargs = mock_cls.call_args_list[0][1]
+        self.assertNotIn("device", call_kwargs)
+
+    async def test_restart_stream_swaps_stream(self):
+        """restart_stream() stops old stream and opens a new one."""
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        stream_a = MagicMock()
+        stream_b = MagicMock()
+        calls = [stream_a, stream_b]
+        with patch("sounddevice.InputStream", side_effect=calls):
+            track = MicTrack(loop)
+            old_stream = track._stream
+            track.restart_stream("New Device")
+            track.stop()
+        self.assertIs(old_stream, stream_a)
+        self.assertIs(track._stream, stream_b)
+        self.assertIsNot(track._stream, old_stream)
+
+    async def test_restart_stream_falls_back_on_error(self):
+        """restart_stream() falls back to system default if device not found."""
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        call_count = 0
+
+        def side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if kwargs.get("device") == "Bad Device":
+                raise ValueError("device not found")
+            return MagicMock()
+
+        with patch("sounddevice.InputStream", side_effect=side_effect):
+            track = MicTrack(loop)  # call 1 (no device)
+            track.restart_stream("Bad Device")  # call 2 fails, call 3 fallback
+            track.stop()
+
+        # call 1: init (no device), call 2: Bad Device (raises), call 3: fallback (no device)
+        self.assertEqual(call_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

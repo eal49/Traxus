@@ -42,12 +42,22 @@ class SettingsScreen(ModalScreen[str | None]):
             "ptt_mode": getattr(app, "_ptt_mode", "toggle"),
             "vad_sensitivity": getattr(app, "_vad_sensitivity", "high"),
             "vad_custom_threshold": getattr(app, "_vad_custom_threshold", 50.0),
+            "input_device": getattr(app, "_input_device", None),
+            "output_device": getattr(app, "_output_device", None),
         })
         return settings
 
     def _nick_color_label(self) -> str:
         color = getattr(self.app, "_nick_color", "")
         return f"Nick Color: {color if color else 'default'}"
+
+    def _input_device_label(self) -> str:
+        dev = getattr(self.app, "_input_device", None)
+        return f"Input Device: {dev if dev else 'System Default'}"
+
+    def _output_device_label(self) -> str:
+        dev = getattr(self.app, "_output_device", None)
+        return f"Output Device: {dev if dev else 'System Default'}"
 
     def _sens_label(self) -> str:
         thr = int(getattr(self.app, "_vad_custom_threshold", 250))
@@ -62,12 +72,15 @@ class SettingsScreen(ModalScreen[str | None]):
             ListItem(Label(f"PTT Mode: {mode_label}"), id="item-ptt-mode"),
             ListItem(Label(self._sens_label()), id="item-vad-sensitivity"),
             ListItem(Label(self._nick_color_label()), id="item-nick-color"),
+            ListItem(Label(self._input_device_label()), id="item-input-device"),
+            ListItem(Label(self._output_device_label()), id="item-output-device"),
             ListItem(Label("Test Microphone"), id="item-mic-test"),
             id="settings-list",
         )
 
     def on_mount(self) -> None:
         self._update_vad_sensitivity_visibility()
+        self._update_device_visibility()
         self._update_mic_test_visibility()
 
     def _rebuild_settings_list(self) -> None:
@@ -83,12 +96,23 @@ class SettingsScreen(ModalScreen[str | None]):
         self.query_one("#item-nick-color", ListItem).query_one(Label).update(
             self._nick_color_label()
         )
+        self.query_one("#item-input-device", ListItem).query_one(Label).update(
+            self._input_device_label()
+        )
+        self.query_one("#item-output-device", ListItem).query_one(Label).update(
+            self._output_device_label()
+        )
         self._update_vad_sensitivity_visibility()
+        self._update_device_visibility()
         self._update_mic_test_visibility()
 
     def _update_vad_sensitivity_visibility(self) -> None:
         current_mode = getattr(self.app, "_ptt_mode", "toggle")
         self.query_one("#item-vad-sensitivity", ListItem).display = (current_mode == "vad")
+
+    def _update_device_visibility(self) -> None:
+        self.query_one("#item-input-device", ListItem).display = AUDIO_AVAILABLE
+        self.query_one("#item-output-device", ListItem).display = AUDIO_AVAILABLE
 
     def _update_mic_test_visibility(self) -> None:
         self.query_one("#item-mic-test", ListItem).display = AUDIO_AVAILABLE
@@ -103,6 +127,10 @@ class SettingsScreen(ModalScreen[str | None]):
             self._open_vad_sensitivity_screen()
         elif event.item.id == "item-nick-color":
             self._open_color_picker()
+        elif event.item.id == "item-input-device":
+            self._open_device_picker("input")
+        elif event.item.id == "item-output-device":
+            self._open_device_picker("output")
         elif event.item.id == "item-mic-test":
             self._open_mic_test()
 
@@ -143,6 +171,23 @@ class SettingsScreen(ModalScreen[str | None]):
     def _on_color_picked(self, result: str | None) -> None:
         if result is not None:
             self.app._set_nick_color(result)  # type: ignore[attr-defined]
+        self._rebuild_settings_list()
+
+    def _open_device_picker(self, kind: str) -> None:
+        from client.screens.device_select_screen import DeviceSelectScreen
+        self.app.push_screen(
+            DeviceSelectScreen(kind),  # type: ignore[arg-type]
+            lambda result: self._on_device_selected(kind, result),
+        )
+
+    def _on_device_selected(self, kind: str, result: "str | None") -> None:
+        if result is None:
+            return  # cancelled
+        device = result if result else None  # "" → None (System Default)
+        if kind == "input":
+            self.app._restart_input_device(device)  # type: ignore[attr-defined]
+        else:
+            self.app._restart_output_device(device)  # type: ignore[attr-defined]
         self._rebuild_settings_list()
 
     def _open_mic_test(self) -> None:

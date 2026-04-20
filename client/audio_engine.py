@@ -59,7 +59,11 @@ class AudioEngine:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    def start(self, loop: asyncio.AbstractEventLoop) -> None:
+    def start(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        device: "str | None" = None,
+    ) -> None:
         """Store the asyncio loop and open the microphone input stream.
         Idempotent: no-op if the stream is already open."""
         if not AUDIO_AVAILABLE:
@@ -67,13 +71,20 @@ class AudioEngine:
         self._loop = loop
         if self._stream is not None:
             return
-        self._stream = sd.InputStream(
+        kwargs: dict = dict(
             samplerate=_SAMPLERATE,
             channels=_CHANNELS,
             dtype=_DTYPE,
             blocksize=_BLOCKSIZE,
             callback=self._input_callback,
         )
+        if device is not None:
+            kwargs["device"] = device
+        try:
+            self._stream = sd.InputStream(**kwargs)
+        except Exception:
+            kwargs.pop("device", None)
+            self._stream = sd.InputStream(**kwargs)
         self._stream.start()
 
     def stop(self) -> None:
@@ -94,6 +105,7 @@ class AudioEngine:
         loop: asyncio.AbstractEventLoop,
         threshold: float,
         callback,
+        device: "str | None" = None,
     ) -> None:
         """Open the mic stream for VAD mode and register the voice/silence callback."""
         if not AUDIO_AVAILABLE:
@@ -102,7 +114,7 @@ class AudioEngine:
         self._vad_callback = callback
         self._vad_voice_state = False
         self._vad_active = True
-        self.start(loop)  # idempotent
+        self.start(loop, device=device)  # idempotent
 
     def stop_vad(self) -> None:
         """Stop VAD mode and close the mic stream."""

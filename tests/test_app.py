@@ -927,5 +927,88 @@ class TestAudioTestCommand(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app._audio_test_running)
 
 
+class TestRestartDeviceAsync(unittest.IsolatedAsyncioTestCase):
+    """Device restart: settings update synchronously; stream ops go to executor."""
+
+    async def _run_with_settings(self, app, coro):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import client.settings as settings_module
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "settings.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_SETTINGS_FILE", f):
+                async with app.run_test():
+                    await coro(app)
+
+    async def test_restart_input_updates_device_synchronously(self):
+        app = TraxusApp()
+
+        async def body(app):
+            app._input_device = None
+            app._restart_input_device("Headset Mic")
+            self.assertEqual(app._input_device, "Headset Mic")
+
+        await self._run_with_settings(app, body)
+
+    async def test_restart_output_updates_device_synchronously(self):
+        app = TraxusApp()
+
+        async def body(app):
+            app._output_device = None
+            app._restart_output_device("Speakers")
+            self.assertEqual(app._output_device, "Speakers")
+
+        await self._run_with_settings(app, body)
+
+    async def test_do_restart_input_dispatches_to_executor_thread(self):
+        import threading
+        from unittest.mock import MagicMock, AsyncMock
+
+        called_from: list[str] = []
+
+        def fake_restart(device):
+            called_from.append(threading.current_thread().name)
+
+        app = TraxusApp()
+
+        async def body(app):
+            pm = MagicMock()
+            pm.mic_track.restart_stream = fake_restart
+            pm.close_all = AsyncMock()
+            app._peer_manager = pm
+            app._ptt_mode = "toggle"
+            await app._do_restart_input("Headset Mic")
+            self.assertEqual(len(called_from), 1)
+            self.assertNotEqual(called_from[0], threading.main_thread().name)
+
+        await self._run_with_settings(app, body)
+
+    async def test_do_restart_output_dispatches_to_executor_thread(self):
+        import threading
+        from unittest.mock import MagicMock, AsyncMock
+
+        called_from: list[str] = []
+
+        def fake_restart(device):
+            called_from.append(threading.current_thread().name)
+
+        app = TraxusApp()
+
+        async def body(app):
+            pm = MagicMock()
+            pm.restart_output_stream = fake_restart
+            pm.close_all = AsyncMock()
+            app._peer_manager = pm
+            await app._do_restart_output("Speakers")
+            self.assertEqual(len(called_from), 1)
+            self.assertNotEqual(called_from[0], threading.main_thread().name)
+
+        await self._run_with_settings(app, body)
+
+
 if __name__ == "__main__":
     unittest.main()
