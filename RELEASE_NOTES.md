@@ -1,3 +1,9 @@
+## What's new in v0.2.1
+
+- **CI fix** — `libportaudio2` is now installed on the Ubuntu test runner before
+  `sounddevice`, resolving an `OSError: PortAudio library not found` import
+  failure that caused all audio-related tests to fail in CI.
+
 ## What's new in v0.2.0
 
 - **WebRTC audio (P2P)** — voice travels directly between clients via aiortc +
