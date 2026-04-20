@@ -58,6 +58,7 @@ class MicTrack(AudioStreamTrack):
 
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._pts: int = 0
+        self._start: float | None = None  # wall-clock origin for pacing
         self._suppressor = (
             _SpectralNoiseSuppressor(_BLOCKSIZE)
             if NS_AVAILABLE and _SpectralNoiseSuppressor is not None
@@ -102,6 +103,17 @@ class MicTrack(AudioStreamTrack):
     # ── aiortc AudioStreamTrack interface ─────────────────────────────────────
 
     async def recv(self) -> "av.AudioFrame":
+        # Pace delivery to one frame per 20 ms (real-time rate).
+        # Without this aiortc polls recv() thousands of times per second,
+        # draining the queue instantly and filling the stream with silence.
+        loop = asyncio.get_running_loop()
+        if self._start is None:
+            self._start = loop.time()
+        target = self._start + self._pts / _SAMPLERATE
+        wait = target - loop.time()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
         try:
             raw = self._queue.get_nowait()
         except asyncio.QueueEmpty:

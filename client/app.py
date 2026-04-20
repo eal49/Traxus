@@ -399,7 +399,7 @@ class TraxusApp(App):
         if joined_voice and self._peer_manager is None:
             loop = asyncio.get_running_loop()
             out_stream = sd.OutputStream(
-                samplerate=16000, channels=1, dtype="int16", latency="low"
+                samplerate=48000, channels=1, dtype="int16", latency=0.08
             )
             out_stream.start()
             mic = MicTrack(loop)
@@ -410,8 +410,11 @@ class TraxusApp(App):
                 ws_worker=self._ws_worker,  # type: ignore[arg-type]
                 stun_url=self._stun_server,
             )
+            # Only the lexicographically smaller username sends the offer to
+            # avoid WebRTC glare (both sides sending offers simultaneously).
             for uname in new_usernames:
-                await self._peer_manager.connect(uname)
+                if local_user < uname:
+                    await self._peer_manager.connect(uname)
         elif left_voice and self._peer_manager is not None:
             await self._peer_manager.close_all()
             self._peer_manager = None
@@ -420,7 +423,8 @@ class TraxusApp(App):
             # Channel unchanged: connect to newly arrived peers
             existing = set(self._peer_manager._peers.keys())
             for uname in new_usernames - existing:
-                await self._peer_manager.connect(uname)
+                if local_user < uname:
+                    await self._peer_manager.connect(uname)
             for uname in existing - new_usernames:
                 await self._peer_manager.disconnect(uname)
 

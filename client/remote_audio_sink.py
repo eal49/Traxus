@@ -45,8 +45,15 @@ class RemoteAudioSink:
         try:
             while True:
                 frame = await self._track.recv()
-                # av.AudioFrame → int16 numpy array
-                pcm = frame.to_ndarray().flatten().astype(np.int16)
+                # av.AudioFrame → mono int16 PCM at the frame's sample rate.
+                # aiortc delivers stereo s16 interleaved: shape (1, n_ch*samples).
+                # Reshape to (samples, n_ch) then average channels → mono.
+                arr = frame.to_ndarray()
+                n_ch = len(frame.layout.channels)
+                if n_ch > 1:
+                    pcm = arr.flatten().reshape(-1, n_ch).mean(axis=1).astype(np.int16)
+                else:
+                    pcm = arr.flatten().astype(np.int16)
 
                 level = self._volume_dict.get(self._username, 100)
                 if level != 100:
