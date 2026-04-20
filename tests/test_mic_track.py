@@ -1,11 +1,11 @@
 """
-Unit tests for client/mic_track.py (task 4.6).
+Unit tests for client/mic_track.py.
 
 Tests:
   - MicTrack.recv() returns silence frames when not transmitting
   - MicTrack.recv() returns real audio frames when transmitting
   - Frame shape (320 samples) and pts sequencing
-  - NS applied in _input_callback when noise_suppression_enabled=True
+  - _input_callback transmit gate
 """
 from __future__ import annotations
 
@@ -103,51 +103,6 @@ class TestMicTrackAudio(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pts_values), 3)
         self.assertLess(pts_values[0], pts_values[1])
         self.assertLess(pts_values[1], pts_values[2])
-
-
-@unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
-class TestMicTrackNoiseSuppression(unittest.IsolatedAsyncioTestCase):
-    """_input_callback applies NS when noise_suppression_enabled=True."""
-
-    async def test_ns_applied_when_enabled(self):
-        from client.mic_track import MicTrack
-
-        loop = asyncio.get_running_loop()
-        with patch("sounddevice.InputStream") as mock_stream_cls:
-            mock_stream_cls.return_value = MagicMock()
-            track = MicTrack(loop)
-            track.noise_suppression_enabled = True
-            track.set_transmitting(True)
-
-        ns = track._suppressor
-        if ns is None:
-            self.skipTest("NS suppressor not available")
-
-        with patch.object(ns, "process", wraps=ns.process) as spy:
-            indata = (np.ones((320, 1), dtype=np.int16) * 500)
-            track._input_callback(indata, 320, {}, None)
-
-        spy.assert_called_once()
-
-    async def test_ns_not_applied_when_disabled(self):
-        from client.mic_track import MicTrack
-
-        loop = asyncio.get_running_loop()
-        with patch("sounddevice.InputStream") as mock_stream_cls:
-            mock_stream_cls.return_value = MagicMock()
-            track = MicTrack(loop)
-            track.noise_suppression_enabled = False
-            track.set_transmitting(True)
-
-        ns = track._suppressor
-        if ns is None:
-            self.skipTest("NS suppressor not available")
-
-        with patch.object(ns, "process") as mock_process:
-            indata = (np.ones((320, 1), dtype=np.int16) * 500)
-            track._input_callback(indata, 320, {}, None)
-
-        mock_process.assert_not_called()
 
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")

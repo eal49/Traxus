@@ -16,10 +16,10 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets numpy
+        run: pip install -r requirements.txt sounddevice aiortc av
 
       - name: Run test suite
         run: python -m unittest discover -s tests -v
@@ -38,7 +38,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets sounddevice numpy pyinstaller
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller
 
       - name: Build executable
         run: pyinstaller traxus.spec
@@ -87,6 +87,7 @@ jobs:
           ## Requirements
 
           - No Python installation needed — the `.exe` is self-contained.
+          - Voice (WebRTC/Opus) is bundled — no extra install required.
           - **Run from Windows Terminal or PowerShell** (not by double-clicking
             from Explorer). See [deploy/windows-build-warnings.md](deploy/windows-build-warnings.md)
             for details.

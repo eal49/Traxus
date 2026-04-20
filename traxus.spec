@@ -7,7 +7,7 @@
 # See deploy/windows-build-warnings.md for known gotchas before editing.
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sounddevice
 
 # ── Locate native DLLs ────────────────────────────────────────────────────────
@@ -38,6 +38,9 @@ a = Analysis(
         ("client/app.tcss", "client"),
         # Textual data files: tree-sitter highlight grammars, etc.
         *collect_data_files("textual"),
+        # aiortc and av metadata/type stubs.
+        *collect_data_files("aiortc"),
+        *collect_data_files("av"),
     ],
     hiddenimports=[
         # websockets uses lazy submodule imports that PyInstaller misses.
@@ -46,6 +49,18 @@ a = Analysis(
         "websockets.exceptions",
         # cffi backend required by sounddevice.
         "_cffi_backend",
+        # aiortc codec modules — loaded dynamically via string lookup at runtime.
+        "aiortc.codecs.opus",
+        "aiortc.codecs.h264",
+        "aiortc.codecs.vpx",
+        "aiortc.codecs.g711",
+        "aiortc.codecs.g722",
+        "aiortc.codecs.base",
+        # aioice ICE transport — lazy submodule used by aiortc.
+        "aioice.stun",
+        # av subpackages — Cython extensions loaded by name at runtime.
+        "av.audio.frame",
+        "av.video.frame",
     ],
     hookspath=[],
     hooksconfig={},

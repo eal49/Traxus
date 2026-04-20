@@ -188,7 +188,12 @@ Voice channels use the same name validation regex as text channels (`^[a-z0-9_-]
 | Voice join | `voice_state` | All current voice members of the channel (including the joiner) |
 | Voice leave | `voice_state` | Remaining voice members of the channel |
 | Disconnect (was in voice) | `voice_state` | Remaining voice members of each voice channel |
-| Binary audio frame | binary WebSocket frame | All other voice members of the channel (not echoed to sender, not sent to non-members) |
+| `voice_offer` / `voice_answer` / `voice_ice` | unicast to `to_user` | Only the named target peer |
+
+**Note:** Audio data never passes through the server. Once WebRTC peers complete
+ICE negotiation, RTP audio flows directly between clients. The server only
+relays the three JSON signaling message types above. Binary WebSocket frames are
+silently ignored.
 
 ### `channel_list` type field
 

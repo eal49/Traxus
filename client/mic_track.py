@@ -30,13 +30,6 @@ _BLOCKSIZE  = 320          # 20 ms per frame
 _DTYPE      = "int16"
 _QUEUE_MAX  = 20           # drop oldest beyond this to avoid memory growth
 
-# Import NS suppressor lazily to avoid circular dependency with audio_engine
-try:
-    from client.audio_engine import _SpectralNoiseSuppressor, NS_AVAILABLE
-except ImportError:
-    _SpectralNoiseSuppressor = None  # type: ignore[assignment,misc]
-    NS_AVAILABLE = False
-
 
 class MicTrack(AudioStreamTrack):
     """
@@ -44,7 +37,6 @@ class MicTrack(AudioStreamTrack):
 
     Public interface:
       set_transmitting(bool)  — gate real vs. silence output
-      noise_suppression_enabled — read/write bool
       stop()                  — close the InputStream
     """
 
@@ -54,16 +46,10 @@ class MicTrack(AudioStreamTrack):
         super().__init__()
         self._loop = loop
         self._transmitting: bool = False
-        self.noise_suppression_enabled: bool = True
 
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._pts: int = 0
         self._start: float | None = None  # wall-clock origin for pacing
-        self._suppressor = (
-            _SpectralNoiseSuppressor(_BLOCKSIZE)
-            if NS_AVAILABLE and _SpectralNoiseSuppressor is not None
-            else None
-        )
 
         self._stream = sd.InputStream(
             samplerate=_SAMPLERATE,
@@ -82,16 +68,10 @@ class MicTrack(AudioStreamTrack):
     # ── sounddevice callback (audio thread) ───────────────────────────────────
 
     def _input_callback(self, indata, frames, time_info, status) -> None:
-        pcm = indata[:, 0]  # shape (320,) int16
-
-        if self._suppressor is not None and self.noise_suppression_enabled:
-            pcm = self._suppressor.process(pcm)
-
-        # Always keep the noise model warm; only enqueue when transmitting.
         if not self._transmitting:
             return
 
-        raw = pcm.tobytes()
+        raw = indata[:, 0].tobytes()
         self._loop.call_soon_threadsafe(self._enqueue_safe, raw)
 
     def _enqueue_safe(self, raw: bytes) -> None:

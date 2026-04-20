@@ -691,21 +691,6 @@ class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("alice", usernames)
 
 
-class TestRelayVoiceNoOp(unittest.IsolatedAsyncioTestCase):
-    """relay_voice is now a no-op — audio goes via WebRTC."""
-
-    async def test_relay_voice_is_no_op(self):
-        router, conn, chan = make_router()
-        ws_a = MockWs()
-        alice = await do_auth(router, conn, ws_a)
-        chan.vcreate("lounge", "Voice", "system")
-        alice.voice_channels.add("lounge")
-
-        # relay_voice must not raise and must not send any binary frames
-        await router.relay_voice(b"\x00\x01\x02", ws_a, alice)
-        # No assertion needed beyond "no exception raised"; binary relay is removed.
-
-
 # ── msg_id in chat messages ───────────────────────────────────────────────────
 
 class TestMsgId(unittest.IsolatedAsyncioTestCase):

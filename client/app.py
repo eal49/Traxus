@@ -111,12 +111,10 @@ class TraxusApp(App):
         settings = load_settings()
         self._audio_engine: AudioEngine = AudioEngine()
         self._stun_server: str = settings.get("stun_server", "stun:stun.l.google.com:19302")
-        self._noise_suppression: bool = bool(settings.get("noise_suppression", True))
         self._ptt_key: str = settings.get("ptt_key", "f9")
         self._ptt_mode: str = settings.get("ptt_mode", "toggle")
         self._vad_sensitivity: str = settings.get("vad_sensitivity", "high")
         self._vad_custom_threshold: float = float(settings.get("vad_custom_threshold", 50.0))
-        self._audio_engine.noise_suppression_enabled = self._noise_suppression
         self._nick_color: str = settings.get("nick_color", "")
         self.push_screen(LoginScreen())
 
@@ -403,7 +401,6 @@ class TraxusApp(App):
             )
             out_stream.start()
             mic = MicTrack(loop)
-            mic.noise_suppression_enabled = self._noise_suppression
             self._peer_manager = PeerManager(
                 mic_track=mic,
                 out_stream=out_stream,

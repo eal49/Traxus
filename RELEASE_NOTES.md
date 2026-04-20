@@ -1,39 +1,25 @@
-## What's new
+## What's new in v0.2.0
 
-- **WebRTC audio** — voice is now transported peer-to-peer over WebRTC (aiortc)
-  instead of being relayed as binary frames through the server. Audio no longer
-  touches the server after the initial WebRTC handshake, eliminating server
-  bandwidth and relay latency entirely.
-- **WebRTC signaling** — the server relays `voice_offer`, `voice_answer`, and
-  `voice_ice` JSON messages to set up peer connections. Once ICE completes,
-  audio flows directly between clients.
-- **MicTrack** — new `client/mic_track.py` bridges sounddevice microphone
-  capture into a WebRTC `AudioStreamTrack`. Silence frames are emitted when PTT
-  is inactive; real PCM frames when transmitting.
-- **RemoteAudioSink** — new `client/remote_audio_sink.py` reads decoded PCM
-  from a remote WebRTC track and writes to the shared `sd.OutputStream` with
-  per-user volume gain applied.
-- **PeerManager** — new `client/peer_manager.py` manages the full lifecycle of
-  `RTCPeerConnection` objects: creating offers, handling answers, adding ICE
-  candidates, and tearing down connections on voice leave.
-- **Spectral noise suppression** retained — `_SpectralNoiseSuppressor` still
-  runs in the microphone callback before PCM is handed to MicTrack.
-- **Per-user volume** — moved from `AudioEngine` to `PeerManager`; keyboard
-  controls in `MemberPanel` (←/→ arrows) work as before.
-
-## Bug fixes
-
-- Loopback playback removed from `MicTestScreen` (not possible in WebRTC
-  pipeline); UI shows "Loopback: Off (audio is WebRTC)" instead of toggling.
+- **WebRTC audio (P2P)** — voice travels directly between clients via aiortc +
+  Opus. The server handles only WebRTC signalling (offer/answer/ICE); no audio
+  data ever touches the server.
+- **MicTrack / PeerManager / RemoteAudioSink** — new modules replace the old
+  binary-relay pipeline end-to-end.
+- **Per-user volume** — keyboard controls (←/→) in the member panel adjust each
+  participant's playback gain (0–200 %).
+- **Noise suppression removed** — the spectral suppressor has been removed from
+  the capture path. Opus handles the signal pipeline; the settings toggle is
+  gone.
+- **`/audioTest` command** — runs a loopback audio verification on the current
+  voice channel.
+- **Release `.exe` now includes WebRTC** — `aiortc` and `av` (PyAV) are bundled
+  into the Windows executable; no extra install required for voice.
 
 ## Breaking changes
 
-- **Binary audio relay removed** — Traxus no longer sends or receives WebSocket
-  binary frames for audio. Servers and clients from v0.1.x are not compatible
-  with this release for voice channels.
-- `shared/voice_protocol.py` and `shared/adpcm.py` have been deleted.
-- `AudioEngine.play()`, `set_send_target()`, and `_playback_worker` have been
-  removed. Code that calls these methods must be updated.
-- `AudioEngine.__init__` no longer accepts a `jitter_buffer_frames` parameter.
-- Per-user volume is now managed by `PeerManager.get_volume()` /
-  `set_volume()`, not `AudioEngine`.
+- **Binary audio relay removed** — v0.1.x clients and servers are not voice-
+  compatible with this release. Text chat still works across versions.
+- `shared/adpcm.py` and `shared/voice_protocol.py` have been removed.
+- `AudioEngine.noise_suppression_enabled`, `AudioEngine.transmitting`, and the
+  `noise_suppression` settings key no longer exist.
+- `client/settings.json` entries for `noise_suppression` are silently ignored.

@@ -11,9 +11,8 @@ runs anywhere Python does.
 ├──────────────┬──────────────────────────────────────────────────────┤
 │ TEXT          │ [10:42] alice   hey, anyone around?                  │
 │  # general   │ [10:42] bob     yep — just finished the build        │
-│  # random    │ [10:43] carol   ● audio is crisp, NS is working      │
-│  # dev       │ [10:43] alice   nice. joining #dev-voice now         │
-│              │                                                       │
+│  # dev       │ [10:43] carol   joining dev-voice now                │
+│              │ [10:43] alice   on my way                            │
 │ VOICE        │                                                       │
 │  ◈ dev-voice │                                                       │
 │    · bob     │                                                       │
@@ -35,7 +34,7 @@ runs anywhere Python does.
 | Works over SSH | ✓ | ✗ |
 | Self-hosted | ✓ | ✗ |
 | Zero telemetry | ✓ | ✗ |
-| Voice + noise suppression | ✓ | ✓ |
+| Voice (WebRTC / Opus P2P) | ✓ | ✓ |
 | Free forever | ✓ | Paywalled features |
 | Open source | ✓ | ✗ |
 
@@ -50,25 +49,24 @@ runs anywhere Python does.
 - Change your nick at any time (`/nick`)
 
 ### Voice
+- **Peer-to-peer WebRTC audio** — voice goes directly between clients via
+  aiortc + Opus; the server only handles signalling (offer/answer/ICE).
+  No audio data ever touches the server.
 - **Three PTT modes** via `/settings`:
   - `Toggle` — press F9 once to start, again to stop
   - `Hold` — hold F9 while speaking (hands-free release)
   - `VAD` — voice activity detection; mic opens automatically when you speak
-- **Spectral noise suppression** — Boll 1979 spectral subtraction filters fan
-  noise, AC hum, and background chatter from your mic before it reaches peers.
-  Runs capture-side with zero wire-format changes; no extra install needed.
-- **ADPCM compression** — 4:1 bandwidth reduction over raw PCM with < 5 % RMS
-  error, implemented in pure numpy
 - Live mic indicator in the status bar (`● MIC`)
+- Per-user volume control (0–200 %) from the member panel
 - VAD calibration screen with live energy bar chart and adjustable threshold
 - Rebind PTT to any key or mouse button (middle-click recommended)
+- Graceful degradation — all text features work without `sounddevice` or `aiortc`
 
 ### Terminal-native UX
 - Keyboard-first — full slash command set, no mouse required
 - Sidebar groups text and voice channels with live member counts
 - Status bar: connection state, username, latency, PTT indicator
 - Login (server URL + username) persists across restarts
-- Graceful degradation — all text features work without `sounddevice`
 
 ### Self-hostable in minutes
 - Single asyncio WebSocket server, zero database, zero config files
@@ -84,8 +82,8 @@ runs anywhere Python does.
 # Install dependencies
 pip install textual websockets
 
-# Voice (optional — enables PTT and VAD)
-pip install sounddevice numpy
+# Voice (optional — enables PTT, VAD, and WebRTC audio)
+pip install sounddevice numpy aiortc av
 
 # Terminal 1 — start the server
 python -m server.main
@@ -96,7 +94,7 @@ python -m client.main
 
 On the login screen enter `ws://localhost:8765`, pick a username, press **Connect**.
 
-> **Python 3.14** is the target interpreter. Python 3.12+ should also work.
+> **Python 3.13+** is recommended. Python 3.12 should also work.
 
 ---
 
@@ -114,6 +112,7 @@ On the login screen enter `ws://localhost:8765`, pick a username, press **Connec
 | `/channels` | List all channels |
 | `/who` | List members in the current channel |
 | `/settings` | Open settings (PTT mode, PTT key, VAD sensitivity) |
+| `/audioTest` | Run a loopback audio test on the current voice channel |
 | `/help` | Print command reference inline |
 | `/quit` | Disconnect and exit |
 
@@ -128,20 +127,21 @@ while you're typing. Change the binding or mode in `/settings`.
 Microphone
     │  16 kHz · mono · int16 · 20 ms frames
     ▼
-Spectral NS          ← Boll 1979 spectral subtraction
-    │  removes stationary noise before peers hear it
+MicTrack (aiortc AudioStreamTrack)
+    │  PCM frames queued at 20 ms wall-clock rate
     ▼
-ADPCM encode         ← 4:1 compression, pure numpy
+Opus encode          ← aiortc / libopus
     │
-    ▼  WebSocket binary frame
-Server relay
+    ▼  RTP over ICE (peer-to-peer, no server relay)
     │
-    ▼  WebSocket binary frame
-ADPCM decode + play  ← background thread, never blocks TUI
+Opus decode          ← aiortc / libopus
+    │  48 kHz stereo → mono · volume gain
+    ▼
+RemoteAudioSink      ← asyncio coroutine, writes to sd.OutputStream
 ```
 
-No round-trip through the server for noise processing — the filter runs
-entirely on your machine, on your mic signal, before it leaves.
+Audio travels directly between peers — the server sees only WebSocket
+signalling messages (SDP offer/answer and ICE candidates).
 
 ---
 
@@ -160,10 +160,9 @@ entirely on your machine, on your mic signal, before it leaves.
 
 ```
 traxus/
-├── shared/                  # Zero-dependency protocol + codec layer
+├── shared/                  # Zero-dependency protocol layer
 │   ├── message_types.py     # C2S / S2C / ErrorCode string constants + VERSION
-│   ├── voice_protocol.py    # Binary audio frame pack / unpack
-│   └── adpcm.py             # IMA ADPCM codec (encode / decode)
+│   └── voice_protocol.py    # WebRTC signalling message helpers
 ├── server/                  # asyncio WebSocket server
 │   ├── main.py              # Entry point, per-connection handler
 │   ├── connection_manager.py
@@ -172,13 +171,17 @@ traxus/
 ├── client/                  # Textual TUI client
 │   ├── app.py               # Root App, reactive state, PTT bindings
 │   ├── ws_worker.py         # WebSocket recv / send / ping loops
-│   ├── audio_engine.py      # Noise suppression + ADPCM + PTT + VAD + playback
+│   ├── audio_engine.py      # VAD + energy callbacks + spectrum visualisation
+│   ├── mic_track.py         # aiortc AudioStreamTrack fed by sounddevice
+│   ├── peer_manager.py      # RTCPeerConnection lifecycle per remote peer
+│   ├── remote_audio_sink.py # WebRTC track → volume gain → sd.OutputStream
 │   ├── commands.py          # Slash command parser
 │   ├── settings.py          # ~/.config/traxus/settings.json persistence
 │   ├── screens/             # LoginScreen, ChatScreen, SettingsScreen,
-│   │                        # VadCalibrationScreen, PttKeyScreen
-│   └── widgets/             # ChannelSidebar, MessageView, InputBar, StatusBar
-├── tests/                   # unittest suite (319 tests)
+│   │                        # VadCalibrationScreen, MicTestScreen, PttKeyScreen
+│   └── widgets/             # ChannelSidebar, MessageView, InputBar,
+│                            # StatusBar, MemberPanel
+├── tests/                   # unittest suite (469 tests)
 ├── docs/                    # Reference documentation
 └── openspec/                # Feature specs and design artefacts
 ```
@@ -191,8 +194,8 @@ traxus/
 python -m unittest discover -s tests -v
 ```
 
-319 tests covering every server component, the full command parser, the binary
-audio protocol, ADPCM round-trips, spectral noise suppression, and an
+469 tests covering every server component, the full command parser, WebRTC
+signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, and an
 end-to-end integration test with a real server subprocess and Textual pilot.
 
 ---
@@ -201,10 +204,12 @@ end-to-end integration test with a real server subprocess and Textual pilot.
 
 | Dependency | Required for |
 |---|---|
-| Python 3.12+ | Everything |
+| Python 3.13+ | Everything |
 | `textual` | TUI client |
 | `websockets` | Client + server |
-| `numpy` | ADPCM codec + noise suppression (voice) |
 | `sounddevice` | Microphone capture + speaker playback (voice) |
+| `numpy` | VAD energy computation + spectrum visualisation (voice) |
+| `aiortc` | WebRTC peer connections + Opus codec (voice) |
+| `av` | PyAV — audio frame decode/encode used by aiortc (voice) |
 
-Install everything: `pip install textual websockets sounddevice numpy`
+Install everything: `pip install textual websockets sounddevice numpy aiortc av`

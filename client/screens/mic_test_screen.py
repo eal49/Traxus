@@ -1,9 +1,8 @@
 """
 MicTestScreen — live mic loopback + spectrogram + level bar.
 
-Opens the microphone, plays captured (NS-filtered) audio back through the
-speakers so the user hears what they sound like to others, and displays a
-rolling ASCII spectrogram (frequency × time) plus an RMS level bar.
+Opens the microphone and displays a rolling ASCII spectrogram (frequency × time)
+plus an RMS level bar.
 """
 from __future__ import annotations
 
@@ -49,12 +48,6 @@ class MicTestScreen(ModalScreen[None]):
         height: 1;
         margin-top: 1;
     }
-    #ns-status {
-        width: 52;
-        text-align: center;
-        color: $text-muted;
-        margin-top: 1;
-    }
     #loopback-status {
         width: 52;
         text-align: center;
@@ -87,7 +80,6 @@ class MicTestScreen(ModalScreen[None]):
         yield Label("Microphone Test", id="mic-test-title")
         yield Static("", id="spectrogram")
         yield Static("", id="level-bar")
-        yield Label("", id="ns-status")
         yield Label("", id="loopback-status")
         yield Label("L=loopback  Esc=close  (slight delay is normal)", id="mic-test-hint")
 
@@ -107,7 +99,6 @@ class MicTestScreen(ModalScreen[None]):
             engine.start_vad(loop, threshold=0.0, callback=self._noop_vad)
         except Exception:
             pass
-        self._refresh_ns_label()
         self._refresh_loopback_label()
         self._render_all()
         self.set_interval(0.05, self._poll)
@@ -182,15 +173,6 @@ class MicTestScreen(ModalScreen[None]):
         filled = _BAR_WIDTH * pct // 100
         bar = "█" * filled + "░" * (_BAR_WIDTH - filled)
         return f"[green]{bar}[/green] {pct:3d}%"
-
-    def _refresh_ns_label(self) -> None:
-        try:
-            engine = self.app._audio_engine  # type: ignore[attr-defined]
-            ns_on = getattr(engine, "noise_suppression_enabled", False)
-            label = "Noise Suppression: On" if ns_on else "Noise Suppression: Off"
-            self.query_one("#ns-status", Label).update(label)
-        except Exception:
-            pass
 
     def _refresh_loopback_label(self) -> None:
         try:

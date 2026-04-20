@@ -357,13 +357,40 @@ Toggle microphone transmission on/off while in a voice channel.
 |---|---|
 | `F9` *(default)* | Toggle PTT — starts or stops sending mic audio to the voice channel |
 
-**Requirements:** Must be joined to a voice channel with `/vjoin` first. `sounddevice` and `numpy` must be installed.
+**Requirements:** Must be joined to a voice channel with `/vjoin` first. `sounddevice`, `numpy`, and `aiortc` must be installed. PTT gates the audio fed into the WebRTC peer connection — the connection itself stays up regardless.
 
 **Status bar:** When PTT is active, the status bar shows `● MIC` in red.
 
 **Note:** This is toggle mode (not hold-to-talk). The PTT binding defaults to F9 and can be changed to any keyboard key or mouse button via `/settings`. The binding fires regardless of which widget is focused.
 
 **Mouse button binding:** PTT can be bound to a mouse button (stored as `mouse1` or `mouse2`). Only left click (`mouse1`) and middle click (`mouse2`) are reliably forwarded by terminal emulators. Right click and side buttons are captured by the terminal itself and will not reach Traxus. Binding to left click conflicts with normal UI interaction, so middle click (`mouse2`) is the recommended mouse PTT button.
+
+---
+
+## /audioTest
+
+Send ten test tones over the active WebRTC voice connection to verify the
+audio pipeline end-to-end.
+
+```
+/audioTest
+```
+
+No arguments.
+
+**Requirements:** Must be joined to a voice channel (`/vjoin`) first, with at
+least one other participant connected. `sounddevice`, `numpy`, and `aiortc` must
+be installed.
+
+**Client effect:** Injects 10 short sine-wave tones (C4–C5 scale, one per
+second) directly into `MicTrack._queue` with `set_transmitting(True)`. The
+tones travel through the WebRTC pipeline (Opus encode → RTP → peer → Opus
+decode) so the listening peer hears a scale if the pipeline is healthy.
+
+**Nothing is sent to the server** — audio travels peer-to-peer via WebRTC.
+
+**Status display:** A local system message confirms the test started and
+finished.
 
 ---
 

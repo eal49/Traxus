@@ -1,7 +1,7 @@
 # Traxus — Architecture & Design Documentation
 
-> **Version:** 0.2.0
-> **Last updated:** 2026-03-13
+> **Version:** 0.2.1
+> **Last updated:** 2026-04-20
 
 Traxus is a terminal-based chat application with real-time voice (push-to-talk)
 built on Python asyncio WebSockets and the Textual TUI framework. Think of it
@@ -50,7 +50,7 @@ as a minimal Discord/TeamSpeak that runs entirely in a terminal.
 **Key properties:**
 
 - **Single server process** — all state is in-memory (no database).
-- **WebSocket-only transport** — text frames carry JSON, binary frames carry audio.
+- **WebSocket for signaling, WebRTC for audio** — JSON text frames carry chat and signaling; voice audio flows peer-to-peer via WebRTC (aiortc) and never passes through the server.
 - **TLS termination at Caddy** — the Python server never handles certificates.
 - **Stateless message routing** — each WebSocket message is self-contained; the server does not maintain request/response correlation.
 
@@ -76,7 +76,10 @@ traxus/
 │   ├── app.py                 ← TraxusApp root; reactive state, message routing
 │   ├── app.tcss               ← Dark Discord-like theme (Textual CSS)
 │   ├── ws_worker.py           ← WebSocket recv/send/ping loops
-│   ├── audio_engine.py        ← Mic capture + speaker playback + VAD
+│   ├── audio_engine.py        ← Mic capture + VAD + noise suppression (no relay)
+│   ├── mic_track.py           ← aiortc AudioStreamTrack fed by sounddevice
+│   ├── peer_manager.py        ← RTCPeerConnection lifecycle per remote participant
+│   ├── remote_audio_sink.py   ← Coroutine: WebRTC track → sd.OutputStream
 │   ├── commands.py            ← Slash command parser (ParsedCommand)
 │   ├── settings.py            ← ~/.config/traxus/settings.json persistence
 │   ├── screens/
@@ -105,13 +108,13 @@ traxus/
 
 ```
 shared/message_types.py ◄──── server/message_router.py
-shared/voice_protocol.py ◄─── server/message_router.py
-shared/adpcm.py ◄──────────── client/audio_engine.py
-                  ◄──────────── shared/voice_protocol.py (codec tags)
+                         ◄──── client/app.py, client/peer_manager.py
 
 shared/ has ZERO runtime dependencies (stdlib only).
-server/ depends on: websockets, numpy, shared/
-client/ depends on: textual, websockets, sounddevice (optional), numpy (optional), shared/
+server/ depends on: websockets, shared/
+client/ depends on: textual, websockets, sounddevice (optional), numpy (optional),
+                    aiortc (optional), av (optional), shared/
+
 ```
 
 ---
@@ -236,8 +239,21 @@ class Channel:
 ├──────────────────┼──────────────────────┼──────────────────────────┤
 │ voice_leave      │ _handle_voice_leave  │ Remove from voice,       │
 │                  │                      │ broadcast voice_state    │
+├──────────────────┼──────────────────────┼──────────────────────────┤
+│ voice_offer      │ _handle_voice_offer  │ Relay SDP offer to       │
+│                  │                      │ named peer; set          │
+│                  │                      │ from_user to sender      │
+├──────────────────┼──────────────────────┼──────────────────────────┤
+│ voice_answer     │ _handle_voice_answer │ Relay SDP answer to      │
+│                  │                      │ named peer               │
+├──────────────────┼──────────────────────┼──────────────────────────┤
+│ voice_ice        │ _handle_voice_ice    │ Relay ICE candidate to   │
+│                  │                      │ named peer               │
 └──────────────────┴──────────────────────┴──────────────────────────┘
 ```
+
+Binary WebSocket frames are silently ignored — audio no longer transits the
+server. All voice audio is P2P via WebRTC.
 
 ### 3.6. Broadcasting
 
@@ -274,20 +290,23 @@ Textual owns the asyncio event loop. All async work runs on the same loop.
 │  │  rendering)       │    │  └─ _ping_loop  (30s timer)  │  │
 │  └──────────────────┘    └──────────────────────────────┘  │
 │                                                             │
-│  ┌──────────────────┐                                      │
-│  │  capture_loop     │ ← drains audio queue, sends frames  │
-│  │  (asyncio.Task)   │                                      │
-│  └──────────────────┘                                      │
+│  ┌──────────────────┐    ┌──────────────────────────────┐  │
+│  │  PeerManager     │    │  RemoteAudioSink (per peer)  │  │
+│  │  (asyncio.Tasks) │    │  ├─ track.recv() loop        │  │
+│  │  RTCPeerConn     │    │  └─ sd.OutputStream.write()  │  │
+│  │  per remote user │    │     (blocking — runs on loop)│  │
+│  └──────────────────┘    └──────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
-         ▲                              ▲
-         │ call_soon_threadsafe         │ call_soon_threadsafe
-         │                              │
-┌────────┴───────┐             ┌────────┴───────┐
-│ sounddevice     │             │ Playback daemon │
-│ audio thread    │             │ thread          │
-│ (mic capture)   │             │ (sd.OutputStream│
-│                 │             │  .write)        │
-└─────────────────┘             └─────────────────┘
+         ▲
+         │ call_soon_threadsafe
+         │
+┌────────┴───────┐
+│ sounddevice     │
+│ audio thread    │
+│ (mic capture)   │
+│ → MicTrack      │
+│   ._queue       │
+└─────────────────┘
 ```
 
 **Critical rule:** Textual sync message handlers must never block or await.
@@ -379,22 +398,21 @@ TraxusApp
               │   WsWorker     │
               │  _recv_loop    │
               └───────┬────────┘
+                      │ (text frames only — no binary audio frames)
+                      ▼
+                 ServerMessage
+                 (posted to app pump)
                       │
-          ┌───────────┼───────────┐
-          │ bytes     │ str       │
-          ▼           ▼           │
-   AudioFrame    ServerMessage    │
-   (posted to    (posted to      │
-    app pump)     app pump)      │
-          │           │           │
-          ▼           ▼           │
-   AudioEngine   match type:     │
-   .play()       ├─ auth_ok      │
-   (enqueue to   ├─ channel_list │
-    daemon       ├─ joined       │
-    thread)      ├─ chat         │
+                 match type:     │
+                 ├─ auth_ok      │
+                 ├─ channel_list │
+                 ├─ joined       │
+                 ├─ chat         │
                  ├─ system       │
-                 ├─ voice_state  │
+                 ├─ voice_state → PeerManager.connect() │
+                 ├─ voice_offer → PeerManager.on_offer() │
+                 ├─ voice_answer→ PeerManager.on_answer()│
+                 ├─ voice_ice   → PeerManager.on_ice()   │
                  ├─ user_list    │
                  ├─ nick_changed │
                  ├─ pong         │
@@ -598,72 +616,81 @@ and displays it in the status bar (e.g., `42ms`).
 
 ### 6.1. Audio Parameters
 
-| Parameter | Value |
-|-----------|-------|
-| Sample rate | 16,000 Hz |
-| Channels | 1 (mono) |
-| Sample format | int16 (signed 16-bit little-endian) |
-| Block size | 320 samples (~20 ms per callback) |
-| Playback queue | 10 frames max (drop-oldest on overflow) |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Capture sample rate | 16,000 Hz | sounddevice InputStream |
+| Capture channels | 1 (mono) | |
+| Capture sample format | int16 | |
+| Capture block size | 320 samples (20 ms) | |
+| Transport codec | Opus (via WebRTC) | aiortc handles encode/decode |
+| Playback sample rate | 48,000 Hz | aiortc/Opus always decodes at 48 kHz |
+| Playback channels | 1 (mono, after channel-average) | |
+| MicTrack queue | 20 frames max | drop-on-full; paced at 20 ms intervals |
 
-### 6.2. Binary Frame Format
+Voice audio never passes through the server. Once WebRTC peers complete ICE
+negotiation, RTP packets travel directly between clients.
 
-Audio is transmitted as WebSocket binary frames with a compact header.
-
-**Client-to-Server (C2S) frame:**
-
-```
-Byte   Field
-─────────────────────────────────
-0      Channel name length (N)
-1..N   Channel name (UTF-8)
-N+1    Codec tag
-N+2..  Audio payload
-```
-
-**Server-to-Client (S2C) frame:**
+### 6.2. WebRTC Audio Pipeline
 
 ```
-Byte       Field
-─────────────────────────────────
-0          Channel name length (N)
-1..N       Channel name (UTF-8)
-N+1        Username length (M)
-N+2..N+1+M Username (UTF-8)
-N+M+2      Codec tag
-N+M+3..    Audio payload
+sounddevice                      aiortc / WebRTC
+InputStream                      pipeline
+  │                                │
+  │  20 ms int16 PCM               │
+  ├─► MicTrack._queue ─────────────► MicTrack.recv()
+  │   (asyncio.Queue, max 20)      │   paces at 20 ms wall-clock rate
+  │                                │   yields av.AudioFrame (s16, 16 kHz)
+  │                                │
+  │                                ├─► Opus encoder  (aiortc internal)
+  │                                │
+  │                                ├─► RTP/SRTP ─────────────────────────► peer
+  │
+  │◄─── RTP/SRTP from peer ─────────────────────────────────────────────────┤
+  │                                │
+  │                                ├─► Opus decoder (aiortc internal → 48 kHz)
+  │                                │
+  │                                ├─► RemoteAudioSink.run()
+  │                                │     av.AudioFrame → int16 PCM
+  │                                │     stereo → mono (channel average)
+  │                                │     per-user volume gain
+  │                                └─► sd.OutputStream.write()
 ```
 
-The server adds the sender's username to the frame so recipients know who is
-speaking. This is done in `MessageRouter.relay_voice()`.
+### 6.3. PeerManager
 
-### 6.3. Codec Tags
+`client/peer_manager.py` manages the lifecycle of `RTCPeerConnection` objects.
 
-| Tag | Name | Description |
-|-----|------|-------------|
-| `0x00` | `CODEC_RAW` | Raw int16 little-endian PCM (fallback) |
-| `0x01` | `CODEC_ADPCM` | IMA ADPCM 4:1 compression |
+**Key responsibilities:**
+- `connect(remote_user)` — creates an `RTCPeerConnection`, adds `MicTrack`, calls `createOffer()`, sends `voice_offer` via `WsWorker.enqueue()`
+- `on_offer(from_user, sdp)` — creates a peer connection for the caller, sets remote description, calls `createAnswer()`, sends `voice_answer`
+- `on_answer(from_user, sdp)` — sets remote description on the existing peer connection
+- `on_ice(from_user, candidate, sdpMid, sdpMLineIndex)` — adds ICE candidate
+- `close_all()` — closes all peer connections (called on `voice_leave` or disconnect)
 
-### 6.4. IMA ADPCM Codec
+**Glare prevention:** When both peers receive `voice_state` simultaneously, only the lexicographically smaller username sends the offer (`local_user < remote_user`). This prevents a race where both sides try to be the caller.
 
-The custom ADPCM implementation in `shared/adpcm.py` provides ~4:1 compression
-over raw PCM with minimal quality loss (RMS error < 5%).
+**Track handling:** When aiortc fires the `track` event on a connection, PeerManager creates a `RemoteAudioSink` and starts it as an asyncio Task.
 
-**ADPCM payload layout:**
+### 6.4. MicTrack
 
-```
-Byte    Field
-──────────────────────────────────────
-0-1     Predictor (int16 LE) — initial sample value
-2-3     Step index (int16 LE) — initial quantizer state
-4..     Nibble-packed samples (2 samples per byte, low nibble first)
-```
+`client/mic_track.py` is an `aiortc.AudioStreamTrack` subclass that bridges sounddevice to WebRTC.
 
-**Encoding** happens in the sounddevice audio thread callback (off the Textual
-pump). **Decoding** happens in the playback daemon thread (also off the pump).
-This ensures the TUI never blocks on codec operations.
+- The sounddevice `InputStream` callback calls `loop.call_soon_threadsafe(_enqueue_safe, raw)` to transfer PCM to the asyncio queue.
+- `recv()` implements wall-clock pacing: it sleeps until the next 20 ms boundary (based on PTS and `loop.time()`) before returning a frame. Without this, aiortc polls `recv()` thousands of times per second, flooding the stream with silence.
+- When `_transmitting` is `False`, `recv()` returns a zeroed frame (silence) to keep the WebRTC connection alive without sending real audio.
+- Noise suppression (if enabled) runs inside the sounddevice callback, before the frame is enqueued.
 
-### 6.5. Spectral Noise Suppression
+### 6.5. RemoteAudioSink
+
+`client/remote_audio_sink.py` is a coroutine that drains a remote `AudioStreamTrack`.
+
+- Calls `await self._track.recv()` in a loop, decoding Opus frames into `av.AudioFrame`.
+- aiortc delivers stereo s16 interleaved frames (shape `(1, 960*n_channels)`). The sink reshapes and averages channels to produce mono PCM.
+- Applies per-user volume gain from `_volume_dict`.
+- Writes the resulting int16 array directly to the shared `sd.OutputStream` (blocking write, but called from an asyncio coroutine — acceptable at 48 kHz / 20 ms cadence).
+- Exits cleanly on `MediaStreamError` (track ended).
+
+### 6.6. Spectral Noise Suppression
 
 Before a captured PCM block is ADPCM-encoded and sent, it passes through a
 pure-numpy spectral subtraction filter (`_SpectralNoiseSuppressor` in
@@ -702,7 +729,7 @@ model is always warm when the user starts transmitting.
 **Graceful degradation:** `NS_AVAILABLE = AUDIO_AVAILABLE`. When numpy is
 absent, `_suppressor` is `None` and the raw PCM path is unchanged.
 
-### 6.6. PTT (Push-to-Talk) State Machine
+### 6.7. PTT (Push-to-Talk) State Machine
 
 ```
                     ┌─────────────────┐
@@ -731,7 +758,7 @@ absent, `_suppressor` is `None` and the raw PCM path is unchanged.
     └─ vad:    auto-transmit on voice activity detection
 ```
 
-### 6.6. VAD (Voice Activity Detection)
+### 6.8. VAD (Voice Activity Detection)
 
 When PTT mode is set to "vad", the microphone stays open continuously and
 monitors audio energy (RMS). When energy exceeds the threshold, transmission
@@ -750,48 +777,42 @@ starts automatically; when it drops below, a hangover timer stops transmission.
 The calibration screen shows a live 40x24 ASCII bar chart of microphone energy
 with a movable threshold line (Up/Down = fine ±10, PgUp/PgDn = coarse ±100).
 
-### 6.7. Audio Thread Safety
+### 6.9. Audio Thread Safety
 
 ```
 ┌────────────────────────────┐
 │ sounddevice audio thread   │  ← Called every ~20ms by OS audio subsystem
-│ _input_callback(indata)    │
-│   ├─ compute RMS           │
-│   ├─ ADPCM encode          │  ← Codec work done HERE, not on pump
+│ MicTrack._input_callback() │
+│   ├─ NS filter (numpy)     │  ← Noise suppression done HERE, not on pump
 │   └─ call_soon_threadsafe  │  ← Bridge to asyncio loop
-│        └─ queue.put_nowait │  ← Nanosecond operation
+│        └─ _queue.put_nowait│  ← Nanosecond operation
 └────────────────────────────┘
               │
               ▼
 ┌────────────────────────────┐
 │ asyncio loop               │
-│ capture_loop coroutine     │
-│   └─ await queue.get()     │
-│        └─ ws.send(frame)   │  ← Send to server
+│ MicTrack.recv()            │
+│   ├─ sleep until 20ms mark │  ← Pacing (prevents aiortc spin-poll)
+│   └─ _queue.get_nowait()   │  ← Returns frame or silence
+│        └─ aiortc Opus enc  │  ← Codec work done inside aiortc
+│             └─ RTP → peer  │
 └────────────────────────────┘
 
 ┌────────────────────────────┐
-│ Textual pump (sync)        │
-│ on_audio_frame(data)       │
-│   └─ AudioEngine.play()    │
-│        └─ play_queue       │  ← put_nowait (~4 µs), returns instantly
-│           .put_nowait()    │
-└────────────────────────────┘
-              │
-              ▼
-┌────────────────────────────┐
-│ Playback daemon thread     │  ← Blocking I/O is fine here
-│ _playback_worker           │
-│   ├─ play_queue.get()      │  ← threading.Queue, blocks until data
-│   ├─ ADPCM decode          │  ← Codec work done HERE
+│ asyncio loop               │
+│ RemoteAudioSink.run()      │  ← Coroutine, one per remote participant
+│   ├─ await track.recv()    │  ← aiortc Opus decode (48 kHz stereo)
+│   ├─ channel average       │  ← stereo → mono
+│   ├─ per-user volume gain  │
 │   └─ sd.OutputStream      │
-│      .write(pcm)           │  ← Blocking write to speaker
+│      .write(pcm)           │  ← Blocking, but at 20ms cadence: ~2ms max
 └────────────────────────────┘
 ```
 
-**Key invariant:** `AudioEngine.play()` must complete in microseconds. It only
-calls `queue.put_nowait()`. All decoding and device I/O happens in the daemon
-thread. If `play()` ever blocked, it would freeze the entire TUI for all users.
+**Key invariant:** `RemoteAudioSink` runs as an asyncio coroutine and calls
+`sd.OutputStream.write()` directly. This is acceptable because the write
+completes in well under the 20 ms frame budget at 48 kHz. No daemon thread is
+required.
 
 ---
 
@@ -934,11 +955,11 @@ WantedBy=multi-user.target
 ```
 # deploy/requirements-server.txt
 websockets>=14.0
-numpy>=1.26
 ```
 
-The server does not need `textual`, `sounddevice`, or any client dependencies.
-`numpy` is required for the ADPCM codec used in voice relay.
+The server does not need `textual`, `sounddevice`, `numpy`, `aiortc`, or any
+client-side dependencies. Voice audio flows peer-to-peer; the server only
+relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
 
 ### 7.6. Infrastructure Summary
 
@@ -950,7 +971,7 @@ The server does not need `textual`, `sounddevice`, or any client dependencies.
 | Caddy | Reverse proxy | TLS termination, auto Let's Encrypt, WSS→WS |
 | UFW | Firewall | Allow 22, 80, 443; deny 8765 |
 | systemd | Process manager | Auto-start, restart on failure |
-| Python venv | Isolation | Server dependencies only |
+| Python venv | Isolation | Server dependencies only (`websockets`) |
 
 ---
 
@@ -1020,39 +1041,48 @@ coroutines to the Textual message pump.
 cooperate with Textual's loop. Long-running sync operations would freeze both
 networking and the UI.
 
-### 9.3. Separate Audio Threads
+### 9.3. Audio Capture in Separate Thread, Playback on asyncio Loop
 
-**Decision:** Audio capture (sounddevice callback) and playback
-(`_playback_worker`) each run in their own threads, separate from the asyncio
-loop and the Textual pump.
+**Decision:** Capture (sounddevice callback) runs in the sounddevice audio
+thread and bridges to the asyncio loop via `loop.call_soon_threadsafe`. Playback
+(`RemoteAudioSink.run()`) runs as an asyncio coroutine directly on the event loop.
 
-**Why:** Audio I/O is inherently real-time and blocking. `sd.OutputStream.write()`
-blocks until the OS audio buffer has room. If this happened on the Textual pump,
-the entire TUI would freeze during audio playback. The bridge is
-`loop.call_soon_threadsafe(queue.put_nowait, data)` — a nanosecond operation
-that transfers data without blocking either side.
+**Why (capture):** The sounddevice callback fires in the OS audio thread at a
+hard real-time rate. It cannot yield, so it must hand off data instantly via
+`call_soon_threadsafe(queue.put_nowait, raw)` and return.
 
-**Trade-off:** Three concurrency domains (asyncio, Textual pump, audio threads)
-increase complexity. The `call_soon_threadsafe` bridge must be used correctly —
-no direct attribute access across thread boundaries.
+**Why (playback):** With WebRTC, decoded frames arrive via aiortc's async
+`track.recv()`. There is no need for a dedicated playback daemon thread.
+`sd.OutputStream.write()` completes in well under the 20 ms frame budget, so
+calling it from an asyncio coroutine does not starve the event loop.
 
-### 9.4. ADPCM Over Raw PCM
+**Trade-off:** `sd.OutputStream.write()` is a short blocking call from the
+asyncio thread. If the OS audio buffer is momentarily full, the coroutine
+blocks briefly. At 48 kHz / 20 ms cadence this is negligible in practice.
 
-**Decision:** Audio is compressed with IMA ADPCM (~4:1 ratio) before
-transmission. Raw PCM is kept as a fallback.
+### 9.4. WebRTC / Opus for Audio Transport
 
-**Why:** At 16 kHz mono int16, raw PCM produces 32 KB/s per speaker. ADPCM
-reduces this to ~8 KB/s with minimal quality loss (RMS error < 5%). This
-matters on bandwidth-constrained connections and reduces server relay load.
+**Decision:** Voice audio is transported peer-to-peer using WebRTC (aiortc)
+with the Opus codec. The server only relays JSON signaling messages (offer,
+answer, ICE candidates).
 
-**Trade-off:** Custom codec implementation (120 lines) instead of using Opus
-or another standard codec. ADPCM quality is lower than Opus, but has zero
-external dependencies beyond numpy.
+**Why:** Peer-to-peer delivery eliminates server bandwidth cost for audio,
+removes the server as a bottleneck, and provides Opus compression (~6–40 kbps
+vs. ~256 kbps for raw PCM) with far higher quality than ADPCM. aiortc provides
+a complete RFC-compliant stack as a pure-Python wheel with no C compiler needed.
+
+**Trade-off:** `aiortc`, `av`, `pyOpenSSL`, and `cryptography` are additional
+runtime dependencies (~30 MB installed). ICE negotiation adds ~1–4 s of startup
+latency before the first audio frame flows. On networks that block UDP, ICE
+falls back to TCP but this requires a TURN server (not currently configured;
+loopback and LAN work without STUN/TURN).
 
 ### 9.5. Spectral Subtraction for Noise Suppression
 
 **Decision:** Capture-side noise reduction uses a pure-numpy spectral
-subtraction implementation rather than a third-party C extension.
+subtraction implementation rather than a third-party C extension. The filter
+runs inside `MicTrack._input_callback()` in the sounddevice audio thread before
+the PCM is enqueued for WebRTC transmission.
 
 **Why:** `speexdsp` and `webrtc-noise-gain` — the natural choices — have no
 prebuilt wheels for Python 3.14 on Windows; they require SWIG and a C compiler.
@@ -1064,7 +1094,7 @@ numpy and runs in ~0.3 ms per 20 ms frame with no new dependencies.
 non-stationary noise (keyboard clicks, sudden sounds). The numpy implementation
 is excellent for stationary noise (fans, AC, hum) and adequate for voice chat.
 If prebuilt wheels become available for Python 3.14, the `_SpectralNoiseSuppressor`
-class can be swapped out without touching the rest of `audio_engine.py`.
+class can be swapped out without touching `mic_track.py`.
 
 ### 9.6. Caddy for TLS Termination
 
@@ -1133,13 +1163,14 @@ its own messages by checking `user_id`.
 
 ### 9.10. Graceful Audio Degradation
 
-**Decision:** `sounddevice` and `numpy` are optional imports. Voice features
-degrade gracefully when they're unavailable.
+**Decision:** `sounddevice`, `numpy`, and `aiortc` are optional imports.
+`WEBRTC_AVAILABLE` in `client/audio_engine.py` is `True` only when all three
+are importable. Voice features degrade gracefully when any dependency is absent.
 
 **Why:** Not all platforms or environments have audio hardware or the required
-native libraries. The chat functionality should work everywhere — voice is an
+native libraries. Chat functionality must work everywhere — voice is an
 enhancement, not a requirement.
 
 **Trade-off:** Voice features show "not available" messages instead of
-crashing, but users on systems without audio support cannot participate in
+crashing, but users without all audio dependencies cannot participate in
 voice channels at all.

@@ -62,8 +62,7 @@ websocket frame
        │                  └─ _handle_<type>(payload, ws, client)
        │                       └─ ConnectionManager / ChannelRegistry mutations
        │                            └─ ws.send(json) / broadcast_to_channel(...)
-       └─ binary frame → MessageRouter.relay_voice(frame, ws, client)
-                           └─ vc.ws.send(s2c_frame) for each voice peer
+       └─ binary frame → ignored (audio is P2P via WebRTC)
 ```
 
 **Key invariant:** `MessageRouter` handlers always return the (possibly updated)
@@ -94,7 +93,10 @@ python -m client.main
 |---|---|---|
 | `app.py` | `TraxusApp` | Root `App`; owns reactive state, routes server messages to ChatScreen |
 | `ws_worker.py` | `WsWorker` | Three asyncio loops: recv, send, ping; posts messages to app |
-| `audio_engine.py` | `AudioEngine` | Microphone capture + speaker playback; noise suppression; VAD; per-user volume |
+| `audio_engine.py` | `AudioEngine` | sounddevice lifecycle; noise suppression; VAD; WEBRTC_AVAILABLE flag |
+| `mic_track.py` | `MicTrack` | `aiortc.AudioStreamTrack` fed by sounddevice; PTS-paced 20 ms frames |
+| `peer_manager.py` | `PeerManager` | `RTCPeerConnection` lifecycle per remote participant; offer/answer/ICE dispatch |
+| `remote_audio_sink.py` | `RemoteAudioSink` | Coroutine: WebRTC track → channel-average → volume gain → `sd.OutputStream` |
 | `commands.py` | — | `parse_input()` → `ParsedCommand`; `HELP_TEXT` |
 | `settings.py` | — | `load()` / `save()` — persists JSON settings to `~/.traxus/settings.json` |
 | `screens/login_screen.py` | `LoginScreen` | Server URL + username form |
@@ -110,13 +112,15 @@ python -m client.main
 #### Message flow (client side)
 
 ```
-WebSocket frame
+WebSocket frame (text only — no binary audio frames)
   └─ WsWorker._recv_loop
-       ├─ bytes  → app.post_message(TraxusApp.AudioFrame(data))
-       │             └─ on_traxus_app_audio_frame → AudioEngine.play()
        └─ str    → app.post_message(TraxusApp.ServerMessage(payload))
                      └─ on_traxus_app_server_message → match payload["type"]
-                          └─ ChatScreen.append_chat / update_channel_list / …
+                          ├─ chat / system / joined / …  → ChatScreen
+                          ├─ voice_state  → PeerManager.connect(remote)
+                          ├─ voice_offer  → PeerManager.on_offer(from, sdp)
+                          ├─ voice_answer → PeerManager.on_answer(from, sdp)
+                          └─ voice_ice    → PeerManager.on_ice(from, cand, …)
 
 User keystroke / command
   └─ InputBar  →  app.handle_input(text)
@@ -149,37 +153,38 @@ BINDINGS = [Binding("f9", "ptt_toggle", "Toggle PTT", priority=True)]
 
 ```
 action_ptt_toggle()
-  └─ AudioEngine.transmitting = True
+  └─ MicTrack.set_transmitting(True)
        └─ sd.InputStream callback (audio thread)
-            └─ loop.call_soon_threadsafe(queue.put_nowait, pcm)
-                 └─ capture_loop coroutine  →  WsWorker.enqueue_binary(frame)
+            └─ loop.call_soon_threadsafe(_enqueue_safe, pcm)
+                 └─ MicTrack._queue (asyncio.Queue, max 20 frames)
+                      └─ MicTrack.recv() (paced at 20 ms wall-clock rate)
+                           └─ aiortc RTCPeerConnection
+                                └─ Opus encode → RTP → remote peer
 ```
 
-**Playback path (audio frame received)**
+**Playback path (audio received from remote peer)**
 
 ```
-WsWorker._recv_loop → TraxusApp.AudioFrame posted
-  └─ on_traxus_app_audio_frame (Textual pump, sync handler)
-       └─ AudioEngine.play(pcm_bytes, codec, username)  ← queue.put_nowait, returns in ~4 µs
-            └─ _playback_worker thread  ← ADPCM decode → per-user gain → sd.OutputStream.write()
+RTP packets arrive at local RTCPeerConnection (aiortc internal)
+  └─ Opus decode → av.AudioFrame (48 kHz stereo)
+       └─ RemoteAudioSink.run() coroutine (asyncio loop)
+            ├─ await track.recv()
+            ├─ stereo → mono (channel average)
+            ├─ per-user volume gain
+            └─ sd.OutputStream.write(pcm)
 ```
 
-**Critical:** `play()` must never block the Textual message pump. The single
-`sd.OutputStream` is owned by a daemon thread. Only `queue.put_nowait()` is
-called on the pump — that takes nanoseconds.
+**Critical:** `RemoteAudioSink` is a plain asyncio coroutine. It calls
+`sd.OutputStream.write()` directly, which completes within the 20 ms frame
+budget. No daemon thread or queue is needed on the playback side.
 
 #### Per-user volume
 
 `AudioEngine` tracks a `_per_user_volume: dict[str, int]` (0–200, default 100).
 `MemberPanel` reads and writes it via `get_volume(username)` / `set_volume(username, level)`.
-Gain is applied in `_playback_worker` after decoding: `np.clip(pcm * level/100, -32768, 32767)`.
+`PeerManager` passes the dict by reference to each `RemoteAudioSink`, which reads
+the level on every decoded frame: `np.clip(pcm * level/100, -32768, 32767)`.
 The 100% fast-path skips the multiply entirely.
-
-#### Noise suppression
-
-A `_SpectralNoiseSuppressor` runs in the `sd.InputStream` callback on the capture side.
-Controlled by `AudioEngine.noise_suppression_enabled` (default `True`); toggled from
-`SettingsScreen`. Guard: `NS_AVAILABLE` mirrors `AUDIO_AVAILABLE` (requires numpy).
 
 #### PTT modes
 
@@ -209,9 +214,8 @@ message pump and freeze the TUI for all connected clients.
 | Context | Allowed |
 |---|---|
 | Textual message pump (sync handlers) | `queue.put_nowait()`, attribute reads/writes |
-| asyncio coroutines | `await queue.get()`, `ws.send()`, `loop.call_soon_threadsafe()` |
+| asyncio coroutines | `await queue.get()`, `ws.send()`, `loop.call_soon_threadsafe()`, `sd.OutputStream.write()` |
 | sounddevice audio thread | `loop.call_soon_threadsafe(asyncio_queue.put_nowait, data)` |
-| playback daemon thread | `threading_queue.get()` (blocking), `sd.OutputStream.write()` |
 
 ### 3. Guard against screen lifecycle errors
 
@@ -238,8 +242,7 @@ hardcode the raw string in server or client code.
 
 `AUDIO_AVAILABLE` is set at import time based on whether `sounddevice` and
 `numpy` are importable. Every voice code path checks this flag and shows a user
-message instead of crashing when the flag is `False`. `NS_AVAILABLE` and
-`ADPCM_AVAILABLE` follow the same pattern for their respective features.
+message instead of crashing when the flag is `False`.
 
 ### 6. Settings persistence
 

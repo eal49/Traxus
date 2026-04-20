@@ -40,9 +40,7 @@ async def client_handler(ws: websockets.asyncio.server.ServerConnection) -> None
     try:
         async for raw in ws:
             if isinstance(raw, bytes):
-                if client is not None:
-                    await router.relay_voice(raw, ws, client)
-                continue
+                continue  # audio is P2P via WebRTC; binary frames are ignored
             client = await router.dispatch(raw, ws, client)
     except websockets.exceptions.ConnectionClosedOK:
         pass

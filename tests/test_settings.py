@@ -107,44 +107,6 @@ class TestNickColorSetting(unittest.TestCase):
         self.assertEqual(result["nick_color"], "")
 
 
-class TestNoiseSuppressionSetting(unittest.TestCase):
-    def test_default_is_true_when_key_absent(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            f = Path(tmpdir) / "settings.json"
-            f.write_text(json.dumps({"ptt_key": "f9"}), encoding="utf-8")
-            with patch.object(settings_module, "_SETTINGS_FILE", f):
-                result = settings_module.load_settings()
-        self.assertTrue(result["noise_suppression"])
-
-    def test_false_value_is_loaded(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            f = Path(tmpdir) / "settings.json"
-            f.write_text(json.dumps({"noise_suppression": False}), encoding="utf-8")
-            with patch.object(settings_module, "_SETTINGS_FILE", f):
-                result = settings_module.load_settings()
-        self.assertFalse(result["noise_suppression"])
-
-    def test_round_trip_persists_false(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir) / "traxus"
-            f = config_dir / "settings.json"
-            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
-                 patch.object(settings_module, "_SETTINGS_FILE", f):
-                settings_module.save_settings({"noise_suppression": False})
-                result = settings_module.load_settings()
-        self.assertFalse(result["noise_suppression"])
-
-    def test_round_trip_persists_true(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_dir = Path(tmpdir) / "traxus"
-            f = config_dir / "settings.json"
-            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
-                 patch.object(settings_module, "_SETTINGS_FILE", f):
-                settings_module.save_settings({"noise_suppression": True})
-                result = settings_module.load_settings()
-        self.assertTrue(result["noise_suppression"])
-
-
 class TestJitterBufferFramesSetting(unittest.TestCase):
     def test_default_is_5_when_key_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:

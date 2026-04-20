@@ -422,9 +422,6 @@ class MessageRouter:
         await self._conn.send_to(target.user_id, relay)
         return client
 
-    async def relay_voice(self, frame: bytes, ws: object, client: "ConnectedClient") -> None:
-        """Binary audio relay — no-op. Audio is now transported via WebRTC."""
-
     # ── Disconnect cleanup ────────────────────────────────────────────────────
 
     async def on_disconnect(self, client: "ConnectedClient") -> None:

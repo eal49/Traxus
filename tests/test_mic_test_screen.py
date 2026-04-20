@@ -15,13 +15,13 @@ from client.app import TraxusApp
 from client.screens.chat_screen import ChatScreen
 from client.screens.settings_screen import SettingsScreen
 from client.screens.mic_test_screen import MicTestScreen, _SPEC_COLS, _SPEC_ROWS, _INTENSITY
-from client.audio_engine import NS_AVAILABLE, _BLOCKSIZE
+from client.audio_engine import AUDIO_AVAILABLE, _BLOCKSIZE
 from textual.widgets import Input
 
 
 # ── Spectrogram rendering tests (pure logic, no Textual needed) ───────────────
 
-@unittest.skipUnless(NS_AVAILABLE, "numpy not available")
+@unittest.skipUnless(AUDIO_AVAILABLE, "numpy not available")
 class TestSpectrogramRendering(unittest.TestCase):
 
     def _make_screen(self) -> MicTestScreen:
@@ -81,7 +81,7 @@ class TestSpectrogramRendering(unittest.TestCase):
 
 # ── Level bar rendering ───────────────────────────────────────────────────────
 
-@unittest.skipUnless(NS_AVAILABLE, "numpy not available")
+@unittest.skipUnless(AUDIO_AVAILABLE, "numpy not available")
 class TestLevelBarRendering(unittest.TestCase):
 
     def _make_screen(self) -> MicTestScreen:
@@ -193,25 +193,6 @@ class TestMicTestScreenIntegration(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(0.2)
             except Exception as exc:
                 self.fail(f"Unmount raised: {exc}")
-
-    async def test_ns_label_reflects_engine_state(self):
-        """NS status label should read On/Off based on engine.noise_suppression_enabled."""
-        app = TraxusApp()
-        async with app.run_test(size=(120, 40)) as pilot:
-            await app.switch_screen(ChatScreen())
-            await pilot.pause()
-
-            app._audio_engine.start = MagicMock()
-            app._audio_engine.start_vad = MagicMock()
-            app._audio_engine.stop_vad = MagicMock()
-
-            app._audio_engine.noise_suppression_enabled = False
-            app.push_screen(MicTestScreen())
-            await pilot.pause(0.2)
-
-            from textual.widgets import Label
-            ns_label = app.screen.query_one("#ns-status", Label)
-            self.assertIn("Off", str(ns_label.render()))
 
 
 if __name__ == "__main__":
