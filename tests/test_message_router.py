@@ -664,6 +664,27 @@ class TestVoiceLeave(unittest.IsolatedAsyncioTestCase):
         usernames = [u["username"] for u in msg.get("users", [])]
         self.assertNotIn("alice", usernames)
 
+    async def test_voice_leave_with_remaining_user_alice_gets_empty_bob_gets_roster(self):
+        """When Alice leaves while Bob remains: Alice gets users=[], Bob gets users=[bob]."""
+        ws2 = MockWs()
+        bob = await do_auth(self.router, self.conn, ws2, username="bob")
+        bob.voice_channels.add("lounge")
+        ws2.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+
+        alice_msg = self.ws.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(alice_msg, "leaving client did not receive voice_state")
+        self.assertEqual(alice_msg.get("users"), [],
+                         "leaving client must receive empty users list")
+
+        bob_msg = ws2.first_of_type(S2C.VOICE_STATE)
+        self.assertIsNotNone(bob_msg, "remaining client did not receive voice_state")
+        bob_usernames = [u["username"] for u in bob_msg.get("users", [])]
+        self.assertEqual(bob_usernames, ["bob"],
+                         "remaining client must see only remaining members")
+
 
 class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
 

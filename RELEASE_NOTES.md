@@ -1,3 +1,11 @@
+## What's new in v0.2.3
+
+- **`/vleave` now works when others are in the channel** — previously, leaving a
+  voice channel while other participants remained would silently fail: WebRTC
+  connections stayed open, the UI kept showing the user as connected, and PTT
+  stayed armed. The server now sends an empty `users` list to the leaving client
+  so it always tears down cleanly regardless of remaining participants.
+
 ## What's new in v0.2.2
 
 - **Audio device selection** — choose input and output devices from Settings.

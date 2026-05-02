@@ -654,6 +654,31 @@ class TestVleaveClientBehaviour(unittest.IsolatedAsyncioTestCase):
             # Here users=[bob] so alice's channel stays set (correct: she's still in).
             self.assertEqual(app.current_voice_channel, "lounge")
 
+    async def test_voice_state_empty_users_closes_peer_manager(self):
+        """voice_state with users=[] must close the PeerManager when in a channel."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+            pm = MagicMock()
+            pm.close_all = AsyncMock()
+            pm._peers = {}
+            app._peer_manager = pm
+            await pilot.pause()
+
+            with patch("client.app.WEBRTC_AVAILABLE", True):
+                app.post_message(_server_msg({
+                    "type": "voice_state",
+                    "channel": "lounge",
+                    "users": [],
+                }))
+                await pilot.pause()
+                await pilot.pause()
+
+            pm.close_all.assert_awaited_once()
+
     async def test_ptt_stops_when_voice_state_clears_channel(self):
         """Active PTT must stop automatically when current_voice_channel is cleared."""
         from unittest.mock import MagicMock, patch

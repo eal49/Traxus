@@ -644,7 +644,7 @@ class TraxusApp(App):
                 if WEBRTC_AVAILABLE:
                     loop = asyncio.get_event_loop()
                     loop.create_task(self._handle_voice_state_webrtc(
-                        channel, users, prev_channel
+                        self.current_voice_channel, users, prev_channel
                     ))
 
             case S2C.VOICE_OFFER:
