@@ -126,6 +126,91 @@ class TestJitterBufferFramesSetting(unittest.TestCase):
         self.assertEqual(result["jitter_buffer_frames"], 5)
 
 
+class TestLoadHistory(unittest.TestCase):
+    def test_missing_file_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_path = Path(tmpdir) / "nonexistent" / "command_history.json"
+            with patch.object(settings_module, "_HISTORY_FILE", fake_path):
+                result = settings_module.load_history()
+        self.assertEqual(result, [])
+
+    def test_corrupt_file_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "command_history.json"
+            f.write_text("not valid json", encoding="utf-8")
+            with patch.object(settings_module, "_HISTORY_FILE", f):
+                result = settings_module.load_history()
+        self.assertEqual(result, [])
+
+    def test_non_list_json_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "command_history.json"
+            f.write_text(json.dumps({"key": "value"}), encoding="utf-8")
+            with patch.object(settings_module, "_HISTORY_FILE", f):
+                result = settings_module.load_history()
+        self.assertEqual(result, [])
+
+    def test_valid_file_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "command_history.json"
+            entries = ["/join #dev", "/nick alice"]
+            f.write_text(json.dumps(entries), encoding="utf-8")
+            with patch.object(settings_module, "_HISTORY_FILE", f):
+                result = settings_module.load_history()
+        self.assertEqual(result, entries)
+
+    def test_non_string_entries_filtered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "command_history.json"
+            f.write_text(json.dumps(["/cmd", 42, None, "/other"]), encoding="utf-8")
+            with patch.object(settings_module, "_HISTORY_FILE", f):
+                result = settings_module.load_history()
+        self.assertEqual(result, ["/cmd", "/other"])
+
+
+class TestSaveHistory(unittest.TestCase):
+    def test_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "command_history.json"
+            entries = ["/join #dev", "/nick alice"]
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_HISTORY_FILE", f):
+                settings_module.save_history(entries)
+                result = settings_module.load_history()
+        self.assertEqual(result, entries)
+
+    def test_creates_directory_if_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "nested" / "traxus"
+            f = config_dir / "command_history.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_HISTORY_FILE", f):
+                settings_module.save_history(["/cmd"])
+            self.assertTrue(config_dir.is_dir())
+            self.assertTrue(f.exists())
+
+    def test_atomic_write_no_tmp_left_behind(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "command_history.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_HISTORY_FILE", f):
+                settings_module.save_history(["/cmd"])
+            tmp_files = list(config_dir.glob("*.tmp"))
+            self.assertEqual(tmp_files, [])
+
+    def test_empty_list_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "traxus"
+            f = config_dir / "command_history.json"
+            with patch.object(settings_module, "_CONFIG_DIR", config_dir), \
+                 patch.object(settings_module, "_HISTORY_FILE", f):
+                settings_module.save_history([])
+                result = settings_module.load_history()
+        self.assertEqual(result, [])
+
+
 class TestVadSensitivityScreenEntryPoint(unittest.TestCase):
     def test_settings_screen_has_open_vad_sensitivity_screen(self):
         from client.screens.settings_screen import SettingsScreen

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 
+from textual import events
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Input, Static
+
+from client.settings import MAX_HISTORY, load_history, save_history
 
 _SELECTION_CMD_RE = re.compile(r"^/(quote|pin)\s$")
 
@@ -35,6 +38,11 @@ class InputBar(Widget):
             id="message-input",
         )
 
+    def on_mount(self) -> None:
+        self._history: list[str] = load_history()
+        self._history_pos: int | None = None
+        self._draft: str = ""
+
     def watch_current_channel(self, channel: str) -> None:
         try:
             self.query_one("#chan-label", Static).update(f"#{channel} ›")
@@ -43,6 +51,50 @@ class InputBar(Widget):
 
     def set_channel(self, channel: str) -> None:
         self.current_channel = channel
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            event.stop()
+            self._history_up()
+        elif event.key == "down":
+            event.stop()
+            self._history_down()
+
+    def _input(self) -> Input | None:
+        try:
+            return self.query_one("#message-input", Input)
+        except Exception:
+            return None
+
+    def _history_up(self) -> None:
+        if not self._history:
+            return
+        inp = self._input()
+        if inp is None:
+            return
+        if self._history_pos is None:
+            self._draft = inp.value
+            self._history_pos = len(self._history) - 1
+        elif self._history_pos > 0:
+            self._history_pos -= 1
+        else:
+            return  # already at oldest
+        inp.value = self._history[self._history_pos]
+        inp.cursor_position = len(inp.value)
+
+    def _history_down(self) -> None:
+        if self._history_pos is None:
+            return
+        inp = self._input()
+        if inp is None:
+            return
+        if self._history_pos < len(self._history) - 1:
+            self._history_pos += 1
+            inp.value = self._history[self._history_pos]
+        else:
+            self._history_pos = None
+            inp.value = self._draft
+        inp.cursor_position = len(inp.value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         m = _SELECTION_CMD_RE.match(event.value)
@@ -54,6 +106,14 @@ class InputBar(Widget):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         if text:
+            if text.startswith("/"):
+                if not self._history or self._history[-1] != text:
+                    self._history.append(text)
+                    if len(self._history) > MAX_HISTORY:
+                        self._history = self._history[-MAX_HISTORY:]
+                    save_history(self._history)
+            self._history_pos = None
+            self._draft = ""
             self.post_message(self.MessageSubmitted(text))
             event.input.clear()
 
