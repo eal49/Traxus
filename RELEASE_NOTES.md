@@ -1,3 +1,15 @@
+## What's new in v0.2.4
+
+- **VAD mode no longer breaks after changing the sensitivity threshold** — opening
+  `/settings → VAD Sensitivity` and pressing Enter or Escape now reliably restarts
+  the mic stream so VAD continues detecting voice when you return to the channel.
+  Previously the stream was closed by the calibration screen but never reopened
+  (cancel path) or restarted synchronously and silently failed on WASAPI (save path).
+  The restart is now async with a short driver-release delay.
+- **PTT key is a no-op in VAD mode** — pressing F9 (or the configured PTT key /
+  mouse button) while in VAD mode no longer accidentally toggles transmission; VAD
+  remains the sole gate for starting and stopping audio.
+
 ## What's new in v0.2.3
 
 - **`/vleave` now works when others are in the channel** — previously, leaving a

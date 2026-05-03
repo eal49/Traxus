@@ -322,7 +322,7 @@ class TraxusApp(App):
                     self._arm_ptt_debounce(PTT_HOLD_INITIAL_DEBOUNCE_MS)
                 else:
                     self._arm_ptt_debounce()  # key-repeat: reset to short timeout
-            else:
+            elif self._ptt_mode != "vad":
                 self.toggle_ptt()
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
@@ -332,7 +332,7 @@ class TraxusApp(App):
                     event.stop()
                     if self._ptt_mode == "hold":
                         self.start_ptt()
-                    else:
+                    elif self._ptt_mode != "vad":
                         self.toggle_ptt()
             except ValueError:
                 pass
@@ -347,6 +347,8 @@ class TraxusApp(App):
                 pass
 
     def action_ptt_toggle(self) -> None:
+        if self._ptt_mode == "vad":
+            return
         self.toggle_ptt()
 
     def toggle_ptt(self) -> None:
@@ -855,6 +857,30 @@ class TraxusApp(App):
                 pass
             if chat:
                 chat.update_vad_listening(True)
+
+    async def _do_restart_vad(self) -> None:
+        if not (self._ptt_mode == "vad" and self.current_voice_channel):
+            return
+        loop = asyncio.get_running_loop()
+        self._cancel_vad_hangover()
+        chat = self._chat()
+        if chat:
+            chat.update_vad_listening(False)
+        try:
+            await loop.run_in_executor(None, self._audio_engine.stop_vad)
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)
+        threshold = self._get_vad_threshold()
+        try:
+            await loop.run_in_executor(
+                None, self._audio_engine.start_vad, loop, threshold, self._on_vad_state
+            )
+        except Exception as exc:
+            self._local(f"VAD restart failed: {exc}")
+            return
+        if chat:
+            chat.update_vad_listening(True)
 
     def _restart_output_device(self, device: "str | None") -> None:
         from client.settings import load_settings, save_settings

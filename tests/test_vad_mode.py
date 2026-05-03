@@ -202,5 +202,129 @@ class TestVadSensitivityDefault(unittest.TestCase):
         self.assertEqual(loaded["vad_sensitivity"], "low")
 
 
+# ── _do_restart_vad ───────────────────────────────────────────────────────────
+
+class TestDoRestartVad(unittest.IsolatedAsyncioTestCase):
+    """_do_restart_vad restarts the VAD stream asynchronously after calibration."""
+
+    async def _setup(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+        app._ptt_mode = "vad"
+        app.current_voice_channel = "lounge"
+
+    async def test_restart_calls_stop_then_start_vad(self):
+        """_do_restart_vad must stop VAD, then start it with the current threshold."""
+        from unittest.mock import AsyncMock, MagicMock, call
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._setup(app, pilot)
+
+            stop_called = []
+            start_called = []
+
+            def fake_stop():
+                stop_called.append(True)
+
+            def fake_start(loop, threshold, callback):
+                start_called.append(threshold)
+
+            app._audio_engine.stop_vad = fake_stop
+            app._audio_engine.start_vad = fake_start
+
+            await app._do_restart_vad()
+
+            self.assertEqual(len(stop_called), 1, "stop_vad must be called once")
+            self.assertEqual(len(start_called), 1, "start_vad must be called once")
+            self.assertGreater(start_called[0], 0, "threshold must be positive")
+
+    async def test_restart_skips_when_not_in_vad_mode(self):
+        """_do_restart_vad must be a no-op when PTT mode is not VAD."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._setup(app, pilot)
+            app._ptt_mode = "toggle"
+
+            start_called = []
+            app._audio_engine.stop_vad = lambda: None
+            app._audio_engine.start_vad = lambda loop, t, cb: start_called.append(t)
+
+            await app._do_restart_vad()
+
+            self.assertEqual(start_called, [], "start_vad must not be called in toggle mode")
+
+    async def test_restart_skips_when_not_in_voice_channel(self):
+        """_do_restart_vad must be a no-op when not in a voice channel."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._setup(app, pilot)
+            app.current_voice_channel = ""
+
+            start_called = []
+            app._audio_engine.stop_vad = lambda: None
+            app._audio_engine.start_vad = lambda loop, t, cb: start_called.append(t)
+
+            await app._do_restart_vad()
+
+            self.assertEqual(start_called, [], "start_vad must not be called without voice channel")
+
+    async def test_start_vad_failure_posts_local_message(self):
+        """When start_vad raises, a local error message must appear."""
+        from client.widgets.message_view import MessageView
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._setup(app, pilot)
+            mv = app.screen.query_one("#messages", MessageView)
+            before = len(mv.lines)
+
+            app._audio_engine.stop_vad = lambda: None
+            app._audio_engine.start_vad = lambda loop, t, cb: (_ for _ in ()).throw(
+                RuntimeError("device unavailable")
+            )
+
+            await app._do_restart_vad()
+            await pilot.pause()
+
+            self.assertGreater(
+                len(mv.lines), before,
+                "A local error message must appear when start_vad fails",
+            )
+
+
+# ── VadSensitivityScreen cancel restart ──────────────────────────────────────
+
+class TestVadSensitivityCancel(unittest.TestCase):
+    """Cancelling VadSensitivityScreen (Escape) must still restart the VAD stream."""
+
+    def _make_screen(self):
+        from unittest.mock import MagicMock
+        from client.screens.settings_screen import SettingsScreen
+
+        screen = SettingsScreen.__new__(SettingsScreen)
+        app_mock = MagicMock()
+        app_mock._ptt_mode = "vad"
+        app_mock.current_voice_channel = "lounge"
+        app_mock._input_device = None
+        app_mock._output_device = None
+        screen._app = app_mock
+        return screen
+
+    def test_cancel_calls_restart_vad_if_active(self):
+        """_on_vad_sensitivity_result(None) must still call _restart_vad_if_active."""
+        screen = self._make_screen()
+        called = []
+        screen._restart_vad_if_active = lambda: called.append(True)
+
+        screen._on_vad_sensitivity_result(None)
+
+        self.assertEqual(
+            called, [True],
+            "_restart_vad_if_active must be called even when user cancels (result=None)",
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()

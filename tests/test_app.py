@@ -476,6 +476,45 @@ class TestPttF9Binding(unittest.IsolatedAsyncioTestCase):
             )
 
 
+    async def test_f9_is_noop_in_vad_mode(self):
+        """F9 must not toggle PTT when PTT mode is VAD."""
+        from unittest.mock import patch
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+            app._ptt_mode = "vad"
+
+            with patch("client.app.WEBRTC_AVAILABLE", True):
+                await pilot.press("f9")
+                await pilot.pause()
+
+            self.assertFalse(
+                app._transmitting,
+                "F9 must not call toggle_ptt() when PTT mode is VAD",
+            )
+
+    async def test_action_ptt_toggle_is_noop_in_vad_mode(self):
+        """action_ptt_toggle must not toggle PTT when PTT mode is VAD."""
+        from unittest.mock import patch
+
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_voice_channel = "lounge"
+            app._ptt_mode = "vad"
+
+            with patch("client.app.WEBRTC_AVAILABLE", True):
+                app.action_ptt_toggle()
+                await pilot.pause()
+
+            self.assertFalse(
+                app._transmitting,
+                "action_ptt_toggle must not call toggle_ptt() when PTT mode is VAD",
+            )
+
+
 # ── /settings command ─────────────────────────────────────────────────────────
 
 class TestSettingsCommand(unittest.IsolatedAsyncioTestCase):

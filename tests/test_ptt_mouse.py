@@ -36,6 +36,7 @@ class TestMousePttHandler(unittest.IsolatedAsyncioTestCase):
     async def _on_chat(self, app, pilot):
         await app.switch_screen(ChatScreen())
         await pilot.pause()
+        app._ptt_mode = "toggle"
 
     async def test_mouse3_toggles_ptt(self):
         """MouseDown button=3 toggles PTT when _ptt_key = 'mouse3'."""

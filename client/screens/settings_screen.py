@@ -161,7 +161,7 @@ class SettingsScreen(ModalScreen[str | None]):
             self.app._vad_custom_threshold = result
             save_settings(self._all_settings())
             self._rebuild_settings_list()
-            self._restart_vad_if_active()
+        self._restart_vad_if_active()
 
     def _open_color_picker(self) -> None:
         from client.screens.color_picker_screen import ColorPickerScreen
@@ -209,17 +209,9 @@ class SettingsScreen(ModalScreen[str | None]):
         self._restart_vad_if_active()
 
     def _restart_vad_if_active(self) -> None:
-        """Restart VAD with the current threshold if in VAD mode + voice channel."""
-        try:
-            if (getattr(self.app, "_ptt_mode", "") == "vad"
-                    and getattr(self.app, "current_voice_channel", "")):
-                # Stop any active transmission first.
-                if getattr(self.app._audio_engine, "transmitting", False):
-                    self.app.stop_ptt()
-                self.app._exit_vad_listening()
-                self.app._enter_vad_listening()
-        except Exception:
-            pass
+        if (getattr(self.app, "_ptt_mode", "") == "vad"
+                and getattr(self.app, "current_voice_channel", "")):
+            self.app.run_worker(self.app._do_restart_vad())
 
 
 class PttKeyScreen(ModalScreen[str | None]):
