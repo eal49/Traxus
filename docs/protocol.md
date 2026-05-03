@@ -606,9 +606,15 @@ Current membership of a voice channel. Sent after every `voice_join`, `voice_lea
 |---|---|---|
 | `type` | string | `"voice_state"` |
 | `channel` | string | Voice channel this state applies to. |
-| `users` | array | Array of `{ user_id, username }` objects for all current voice members. Empty array means no one is in the channel. |
+| `users` | array | Array of `{ user_id, username }` objects for all current voice members. Empty array means no one is in the channel (or the recipient has just left). |
 
-Sent to: all current voice members of the channel (after join: includes the joiner; after leave/disconnect: does not include the departed user).
+**Delivery after `voice_join`:** sent to all current voice members including the joiner; `users` lists everyone now in the channel.
+
+**Delivery after `voice_leave`:** two separate deliveries:
+- **Leaving client** — `users: []` (always empty), signalling unambiguous departure regardless of remaining participants.
+- **Remaining members** — `users` lists everyone still in the channel (excludes the leaver).
+
+**Delivery after disconnect:** remaining members only; `users` excludes the disconnected client.
 
 ---
 

@@ -34,10 +34,9 @@ RELEASE_NOTES.md ← edited before every git tag (see Releasing below)
 | File | Purpose |
 |---|---|
 | `message_types.py` | `C2S`, `S2C`, `AuthError`, `ErrorCode` string constants + `VERSION` |
-| `voice_protocol.py` | Binary frame packing/unpacking for PCM audio (`pack_c2s`, `unpack_s2c`) |
 
-These modules have zero runtime dependencies beyond the stdlib. Both server and
-client import them. **Never add I/O or framework imports here.**
+This module has zero runtime dependencies beyond the stdlib. Both server and
+client import it. **Never add I/O or framework imports here.**
 
 ---
 
@@ -93,7 +92,7 @@ python -m client.main
 |---|---|---|
 | `app.py` | `TraxusApp` | Root `App`; owns reactive state, routes server messages to ChatScreen |
 | `ws_worker.py` | `WsWorker` | Three asyncio loops: recv, send, ping; posts messages to app |
-| `audio_engine.py` | `AudioEngine` | sounddevice lifecycle; noise suppression; VAD; WEBRTC_AVAILABLE flag |
+| `audio_engine.py` | `AudioEngine` | sounddevice lifecycle; input device selection; VAD; WEBRTC_AVAILABLE flag |
 | `mic_track.py` | `MicTrack` | `aiortc.AudioStreamTrack` fed by sounddevice; PTS-paced 20 ms frames |
 | `peer_manager.py` | `PeerManager` | `RTCPeerConnection` lifecycle per remote participant; offer/answer/ICE dispatch |
 | `remote_audio_sink.py` | `RemoteAudioSink` | Coroutine: WebRTC track → channel-average → volume gain → `sd.OutputStream` |
@@ -101,7 +100,8 @@ python -m client.main
 | `settings.py` | — | `load()` / `save()` — persists JSON settings to `~/.traxus/settings.json` |
 | `screens/login_screen.py` | `LoginScreen` | Server URL + username form |
 | `screens/chat_screen.py` | `ChatScreen` | Main chat view; delegates display to widgets |
-| `screens/settings_screen.py` | `SettingsScreen` | Modal settings panel (PTT mode/key, noise suppression toggle) |
+| `screens/settings_screen.py` | `SettingsScreen` | Modal settings panel (PTT mode/key, input/output device selection) |
+| `screens/device_select_screen.py` | `DeviceSelectScreen` | Modal device picker; enumerates sounddevice devices asynchronously |
 | `screens/vad_calibration_screen.py` | `VadCalibrationScreen` | Guided ambient-noise calibration for VAD threshold |
 | `widgets/channel_sidebar.py` | `ChannelSidebar` | Left panel — text and voice channels |
 | `widgets/member_panel.py` | `MemberPanel` | Right panel — members list + per-user volume bars (keyboard-navigable) |
@@ -282,24 +282,31 @@ same pattern.
 
 | Test file | What it covers |
 |---|---|
-| `test_adpcm.py` | ADPCM encode/decode round-trips |
-| `test_app.py` | TraxusApp unit tests including PTT bindings |
-| `test_audio_engine.py` | AudioEngine: noise suppression flag, per-user volume, playback gain |
+| `test_app.py` | TraxusApp unit tests including PTT bindings and vleave behaviour |
+| `test_audio_e2e.py` | End-to-end audio pipeline integration |
+| `test_audio_engine.py` | AudioEngine: per-user volume, playback gain, device selection |
 | `test_channel_registry.py` | ChannelRegistry CRUD and validation |
+| `test_color_picker_screen.py` | ColorPickerScreen palette and selection |
 | `test_commands.py` | `parse_input()` for all slash commands |
 | `test_connection_manager.py` | ConnectedClient registration, broadcast, nick change |
+| `test_device_select_screen.py` | DeviceSelectScreen async device enumeration and selection |
 | `test_member_panel.py` | MemberPanel rendering, volume bar, keyboard navigation |
 | `test_message_router.py` | MessageRouter dispatch for every C2S message type |
+| `test_message_view.py` | MessageView markup stripping and rendering |
 | `test_message_view_utils.py` | Rich markup formatting helpers |
-| `test_multiclient_ptt.py` | Multi-client audio relay; Textual pump latency during burst |
-| `test_noise_suppression_demo.py` | Spectral suppressor effectiveness; generates `tests/noise_suppression_demo.png` |
+| `test_mic_test_screen.py` | MicTestScreen and spectrogram rendering |
+| `test_mic_track.py` | MicTrack silence, transmit gate, device selection |
+| `test_peer_manager.py` | PeerManager connect/disconnect, offer/answer/ICE, volume |
+| `test_pin_e2e.py` | Message selection mode, pin/quote commands end-to-end |
 | `test_ptt_e2e.py` | Full integration: real server subprocess + Textual pilot |
 | `test_ptt_hold_mode.py` | PTT hold-mode debounce behaviour |
 | `test_ptt_mouse.py` | Mouse-button PTT binding |
+| `test_remote_audio_sink.py` | RemoteAudioSink volume gain, stream-holder swap, exit |
 | `test_settings.py` | Settings load/save/defaults round-trips |
+| `test_signaling_relay.py` | Server relays voice_offer/answer/ice to correct peer |
 | `test_vad_calibration.py` | VAD calibration screen logic |
 | `test_vad_mode.py` | VAD onset, hangover, sensitivity |
-| `test_voice_protocol.py` | Binary frame pack/unpack round-trip |
+| `test_vad_sensitivity_screen.py` | VAD sensitivity screen navigation and rendering |
 
 **Mandatory:** every edit must leave `python -m unittest discover -s tests -v` fully green.
 

@@ -60,6 +60,8 @@ runs anywhere Python does.
 - Per-user volume control (0–200 %) from the member panel
 - VAD calibration screen with live energy bar chart and adjustable threshold
 - Rebind PTT to any key or mouse button (middle-click recommended)
+- **Audio device selection** — choose input and output devices from `/settings`;
+  hot-swaps mid-call without requiring a rejoin, without freezing the UI
 - Graceful degradation — all text features work without `sounddevice` or `aiortc`
 
 ### Terminal-native UX
@@ -111,7 +113,7 @@ On the login screen enter `ws://localhost:8765`, pick a username, press **Connec
 | `/nick <name>` | Change your display name |
 | `/channels` | List all channels |
 | `/who` | List members in the current channel |
-| `/settings` | Open settings (PTT mode, PTT key, VAD sensitivity) |
+| `/settings` | Open settings (PTT mode, PTT key, VAD sensitivity, audio devices) |
 | `/audioTest` | Run a loopback audio test on the current voice channel |
 | `/help` | Print command reference inline |
 | `/quit` | Disconnect and exit |
@@ -181,7 +183,7 @@ traxus/
 │   │                        # VadCalibrationScreen, MicTestScreen, PttKeyScreen
 │   └── widgets/             # ChannelSidebar, MessageView, InputBar,
 │                            # StatusBar, MemberPanel
-├── tests/                   # unittest suite (469 tests)
+├── tests/                   # unittest suite (490 tests)
 ├── docs/                    # Reference documentation
 └── openspec/                # Feature specs and design artefacts
 ```
@@ -194,9 +196,10 @@ traxus/
 python -m unittest discover -s tests -v
 ```
 
-469 tests covering every server component, the full command parser, WebRTC
-signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, and an
-end-to-end integration test with a real server subprocess and Textual pilot.
+490 tests covering every server component, the full command parser, WebRTC
+signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, audio device
+selection, and an end-to-end integration test with a real server subprocess
+and Textual pilot.
 
 ---
 

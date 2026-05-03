@@ -327,9 +327,12 @@ Leave the current (or specified) voice channel.
 
 **S2C responses:**
 
-| Type | When |
-|---|---|
-| `voice_state` | Sent to remaining voice members with the updated (smaller) member list |
+| Type | When | `users` field |
+|---|---|---|
+| `voice_state` | Sent to the **leaving client** | Always `[]` — signals departure unambiguously |
+| `voice_state` | Sent to remaining voice members | Updated roster (excludes the leaver) |
+
+The leaving client always receives `users: []` regardless of how many participants remain. This ensures the client clears `current_voice_channel`, closes WebRTC connections, and stops PTT/VAD.
 
 ---
 
@@ -411,7 +414,11 @@ No arguments.
 | Item | Description |
 |---|---|
 | `PTT Key` | Rebind the push-to-talk key or button. Press any key or click a mouse button to capture it, or Escape to cancel. |
+| `PTT Mode` | Switch between Toggle, Hold, and VAD modes. |
+| `VAD Sensitivity` | Adjust the voice-activity detection threshold (opens calibration screen). |
+| `Input Device` | Choose the microphone. Opens a device picker listing all sounddevice inputs; "System Default" restores the OS default. Hot-swaps mid-call without rejoining. |
+| `Output Device` | Choose the speaker/headphones. Same picker, hot-swaps without rejoining or audio interruption. |
 
-**Selecting PTT Key:** A capture screen appears showing the current binding. Press any key or click a mouse button to set it as the new PTT binding immediately (no restart required). The setting is saved to `~/.config/traxus/settings.json` and restored on next launch. Only left click (`mouse1`) and middle click (`mouse2`) are reliably forwarded by terminal emulators — right click and side buttons will not be captured. **Caution:** binding to left click (`mouse1`) conflicts with normal UI interaction; middle click (`mouse2`) is recommended.
+**Selecting PTT Key:** A capture screen appears showing the current binding. Press any key or click a mouse button to set it as the new PTT binding immediately (no restart required). The setting is saved to `~/.traxus/settings.json` and restored on next launch. Only left click (`mouse1`) and middle click (`mouse2`) are reliably forwarded by terminal emulators — right click and side buttons will not be captured. **Caution:** binding to left click (`mouse1`) conflicts with normal UI interaction; middle click (`mouse2`) is recommended.
 
-The menu is extensible — future settings will appear as additional items in the same modal.
+**Selecting Input/Output Device:** A scrollable list of available audio devices is shown; device enumeration runs in a background worker so the picker opens instantly. The selection persists across sessions. Changing the device while in a voice channel hot-swaps the stream: the new device is opened before the old one is closed, so audio is seamless (at most a brief silence). If the selected device becomes unavailable, the system default is used as fallback.

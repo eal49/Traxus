@@ -1,7 +1,7 @@
 # Traxus — Architecture & Design Documentation
 
-> **Version:** 0.2.1
-> **Last updated:** 2026-04-20
+> **Version:** 0.2.3
+> **Last updated:** 2026-05-03
 
 Traxus is a terminal-based chat application with real-time voice (push-to-talk)
 built on Python asyncio WebSockets and the Textual TUI framework. Think of it
@@ -76,7 +76,7 @@ traxus/
 │   ├── app.py                 ← TraxusApp root; reactive state, message routing
 │   ├── app.tcss               ← Dark Discord-like theme (Textual CSS)
 │   ├── ws_worker.py           ← WebSocket recv/send/ping loops
-│   ├── audio_engine.py        ← Mic capture + VAD + noise suppression (no relay)
+│   ├── audio_engine.py        ← Mic capture + VAD + device selection (no relay)
 │   ├── mic_track.py           ← aiortc AudioStreamTrack fed by sounddevice
 │   ├── peer_manager.py        ← RTCPeerConnection lifecycle per remote participant
 │   ├── remote_audio_sink.py   ← Coroutine: WebRTC track → sd.OutputStream
@@ -85,7 +85,8 @@ traxus/
 │   ├── screens/
 │   │   ├── login_screen.py    ← Server URL + username form
 │   │   ├── chat_screen.py     ← 3-panel layout (sidebar, messages, members)
-│   │   ├── settings_screen.py ← PTT key/mode/VAD config modal
+│   │   ├── settings_screen.py ← PTT key/mode/VAD config + device selection modal
+│   │   ├── device_select_screen.py ← Async device picker (input/output)
 │   │   └── vad_calibration_screen.py ← Live energy bar chart for VAD tuning
 │   └── widgets/
 │       ├── channel_sidebar.py ← Text/voice channel list (ListView)
@@ -368,9 +369,12 @@ TraxusApp
 │  └─ ListView
 │     ├─ PTT Key: F9
 │     ├─ PTT Mode: Toggle / Hold / VAD
-│     └─ VAD Sensitivity: Low / Medium / High / Very High / Custom
+│     ├─ VAD Sensitivity: Low / Medium / High / Very High / Custom
+│     ├─ Input Device: System Default / <device name>
+│     └─ Output Device: System Default / <device name>
 │
 ├─ PttKeyScreen (modal, key capture)
+├─ DeviceSelectScreen (modal, async device list)
 │
 └─ VadCalibrationScreen (modal, live audio energy chart)
    ├─ Static (title)

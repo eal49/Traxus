@@ -186,7 +186,8 @@ Voice channels use the same name validation regex as text channels (`^[a-z0-9_-]
 | Event | S2C type | Recipients |
 |---|---|---|
 | Voice join | `voice_state` | All current voice members of the channel (including the joiner) |
-| Voice leave | `voice_state` | Remaining voice members of the channel |
+| Voice leave | `voice_state` (to leaver) | The leaving client only — `users: []` always, regardless of remaining participants |
+| Voice leave | `voice_state` (to remaining) | Remaining voice members — `users` lists everyone still present |
 | Disconnect (was in voice) | `voice_state` | Remaining voice members of each voice channel |
 | `voice_offer` / `voice_answer` / `voice_ice` | unicast to `to_user` | Only the named target peer |
 
