@@ -1,9 +1,16 @@
-# Traxus
+<div align="center">
 
-**Real-time text and voice chat — entirely in your terminal.**
+<img src="Art/HX1vx.jpg" width="480" alt="Traxus">
 
-No Electron. No browser. No subscription. Just a fast, keyboard-driven TUI that
-runs anywhere Python does.
+# TRAXUS
+
+*Real-time text and voice chat — entirely in your terminal.*
+
+![Python](https://img.shields.io/badge/python-3.14%2B-blue?style=flat)
+![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey?style=flat)
+![Tests](https://img.shields.io/badge/tests-547%20passing-brightgreen?style=flat)
+
+</div>
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -42,13 +49,13 @@ runs anywhere Python does.
 
 ## Features
 
-### Text chat
+### 💬 Text Chat
 - Multiple channels — join, leave, create on the fly
 - Scrolling message history with Rich-formatted output
 - Per-channel member list (`/who`) with live presence updates
 - Change your nick at any time (`/nick`)
 
-### Voice
+### 🎙️ Voice
 - **Peer-to-peer WebRTC audio** — voice goes directly between clients via
   aiortc + Opus; the server only handles signalling (offer/answer/ICE).
   No audio data ever touches the server.
@@ -64,13 +71,15 @@ runs anywhere Python does.
   hot-swaps mid-call without requiring a rejoin, without freezing the UI
 - Graceful degradation — all text features work without `sounddevice` or `aiortc`
 
-### Terminal-native UX
+### ⌨️ Terminal-native UX
 - Keyboard-first — full slash command set, no mouse required
+- Tab / Shift+Tab completes slash command names in the input bar
+- Up / Down arrow recalls previously submitted slash commands
 - Sidebar groups text and voice channels with live member counts
 - Status bar: connection state, username, latency, PTT indicator
 - Login (server URL + username) persists across restarts
 
-### Self-hostable in minutes
+### 🚀 Self-hostable in minutes
 - Single asyncio WebSocket server, zero database, zero config files
 - Deploy on any Ubuntu 24.04 VPS (Hetzner, OVH, Linode, …)
 - TLS via Caddy + Let's Encrypt, subdomain via Duck DNS
@@ -96,7 +105,7 @@ python -m client.main
 
 On the login screen enter `ws://localhost:8765`, pick a username, press **Connect**.
 
-> **Python 3.13+** is recommended. Python 3.12 should also work.
+> **Python 3.14+** is required.
 
 ---
 
@@ -163,8 +172,7 @@ signalling messages (SDP offer/answer and ICE candidates).
 ```
 traxus/
 ├── shared/                  # Zero-dependency protocol layer
-│   ├── message_types.py     # C2S / S2C / ErrorCode string constants + VERSION
-│   └── voice_protocol.py    # WebRTC signalling message helpers
+│   └── message_types.py     # C2S / S2C / ErrorCode string constants + VERSION
 ├── server/                  # asyncio WebSocket server
 │   ├── main.py              # Entry point, per-connection handler
 │   ├── connection_manager.py
@@ -178,12 +186,13 @@ traxus/
 │   ├── peer_manager.py      # RTCPeerConnection lifecycle per remote peer
 │   ├── remote_audio_sink.py # WebRTC track → volume gain → sd.OutputStream
 │   ├── commands.py          # Slash command parser
-│   ├── settings.py          # ~/.config/traxus/settings.json persistence
+│   ├── settings.py          # ~/.config/traxus/ persistence (settings + history)
 │   ├── screens/             # LoginScreen, ChatScreen, SettingsScreen,
-│   │                        # VadCalibrationScreen, MicTestScreen, PttKeyScreen
+│   │                        # VadCalibrationScreen, VadSensitivityScreen,
+│   │                        # MicTestScreen, ColorPickerScreen, DeviceSelectScreen
 │   └── widgets/             # ChannelSidebar, MessageView, InputBar,
 │                            # StatusBar, MemberPanel
-├── tests/                   # unittest suite (490 tests)
+├── tests/                   # unittest suite (547 tests)
 ├── docs/                    # Reference documentation
 └── openspec/                # Feature specs and design artefacts
 ```
@@ -196,7 +205,7 @@ traxus/
 python -m unittest discover -s tests -v
 ```
 
-490 tests covering every server component, the full command parser, WebRTC
+547 tests covering every server component, the full command parser, WebRTC
 signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, audio device
 selection, and an end-to-end integration test with a real server subprocess
 and Textual pilot.
@@ -207,7 +216,7 @@ and Textual pilot.
 
 | Dependency | Required for |
 |---|---|
-| Python 3.13+ | Everything |
+| Python 3.14+ | Everything |
 | `textual` | TUI client |
 | `websockets` | Client + server |
 | `sounddevice` | Microphone capture + speaker playback (voice) |
