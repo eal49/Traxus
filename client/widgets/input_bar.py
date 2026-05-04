@@ -9,6 +9,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Input, Static
 
+from client.commands import KNOWN_COMMANDS
 from client.settings import MAX_HISTORY, load_history, save_history
 
 _SELECTION_CMD_RE = re.compile(r"^/(quote|pin)\s$")
@@ -42,6 +43,10 @@ class InputBar(Widget):
         self._history: list[str] = load_history()
         self._history_pos: int | None = None
         self._draft: str = ""
+        self._completions: list[str] = []
+        self._completion_pos: int | None = None
+        self._completion_prefix: str = ""
+        self._completing: bool = False
 
     def watch_current_channel(self, channel: str) -> None:
         try:
@@ -59,6 +64,24 @@ class InputBar(Widget):
         elif event.key == "down":
             event.stop()
             self._history_down()
+        elif event.key == "tab":
+            event.stop()
+            self._complete(forward=True)
+        elif event.key == "shift+tab":
+            event.stop()
+            self._complete(forward=False)
+        elif event.key == "escape":
+            if self._completion_pos is not None:
+                event.stop()
+                inp = self._input()
+                if inp is not None:
+                    self._completing = True
+                    inp.value = self._completion_prefix
+                    inp.cursor_position = len(inp.value)
+                    self._completing = False
+                self._completion_pos = None
+                self._completions = []
+                self._completion_prefix = ""
 
     def _input(self) -> Input | None:
         try:
@@ -96,7 +119,39 @@ class InputBar(Widget):
             inp.value = self._draft
         inp.cursor_position = len(inp.value)
 
+    def _complete(self, forward: bool) -> None:
+        inp = self._input()
+        if inp is None:
+            return
+        value = inp.value
+        if not value.startswith("/") or len(value) < 2:
+            return
+        prefix = value[1:]
+        if self._completion_pos is None:
+            candidates = sorted(c for c in KNOWN_COMMANDS if c.startswith(prefix))
+            if not candidates:
+                return
+            if len(candidates) == 1:
+                self._completing = True
+                inp.value = f"/{candidates[0]}"
+                inp.cursor_position = len(inp.value)
+                self._completing = False
+                return
+            self._completions = candidates
+            self._completion_prefix = value
+            self._completion_pos = 0 if forward else len(candidates) - 1
+        else:
+            step = 1 if forward else -1
+            self._completion_pos = (self._completion_pos + step) % len(self._completions)
+        self._completing = True
+        inp.value = f"/{self._completions[self._completion_pos]}"
+        inp.cursor_position = len(inp.value)
+        self._completing = False
+
     def on_input_changed(self, event: Input.Changed) -> None:
+        if not self._completing:
+            self._completion_pos = None
+            self._completions = []
         m = _SELECTION_CMD_RE.match(event.value)
         if m:
             command = m.group(1)
