@@ -1,3 +1,21 @@
+## What's new in v0.2.5
+
+- **Slash-command history** — Up/Down arrows in the input bar cycle through
+  previously submitted slash commands, bash-style. History is persisted to
+  `~/.config/traxus/command_history.json` across restarts, capped at 200
+  entries, with consecutive-duplicate suppression. Plain chat messages are
+  excluded. The current draft is saved and restored when navigating back.
+- **Tab completion for slash commands** — Tab cycles forward through command
+  names matching the current prefix; Shift+Tab cycles backward. Single match
+  completes immediately. Escape restores the original prefix. No trailing space
+  is inserted, avoiding accidental triggering of `/quote` / `/pin` selection mode.
+- **Polished GitHub landing page** — README now has a centered hero logo,
+  shields.io badges (Python 3.14+, platform, test count), and emoji section
+  headers for scannability. Stale content fixed: removed non-existent
+  `voice_protocol.py` and `PttKeyScreen` from the structure table, added
+  `ColorPickerScreen`, `DeviceSelectScreen`, and `VadSensitivityScreen`,
+  and updated the Python version requirement to 3.14+.
+
 ## What's new in v0.2.4
 
 - **VAD mode no longer breaks after changing the sensitivity threshold** — opening
