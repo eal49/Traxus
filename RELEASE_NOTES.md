@@ -1,3 +1,15 @@
+## What's new in v0.2.6
+
+- **Multi-peer voice fixed** — audio is now intelligible when 3 or more clients
+  share a voice channel. Previously each `RemoteAudioSink` wrote PCM directly to
+  a shared `sd.OutputStream` from concurrent executor threads; PortAudio
+  serialised the writes instead of mixing them, producing choppy round-robin
+  playback or silence. A new `AudioMixer` class is now the sole writer: it
+  collects decoded frames from all remote participants in per-user queues, sums
+  them with float32 accumulation (clipped to int16), and performs exactly one
+  `OutputStream.write()` call every 20 ms — regardless of how many speakers are
+  active.
+
 ## What's new in v0.2.5
 
 - **Slash-command history** — Up/Down arrows in the input bar cycle through

@@ -1,9 +1,9 @@
 """
-RemoteAudioSink — drains a remote aiortc AudioStreamTrack to sounddevice.
+RemoteAudioSink — drains a remote aiortc AudioStreamTrack into AudioMixer.
 
 One instance runs per remote participant.  It reads decoded av.AudioFrame
-objects, converts to int16 PCM, applies per-user volume gain, and writes
-to the shared sd.OutputStream.
+objects, converts to int16 PCM, applies per-user volume gain, and pushes
+to the shared AudioMixer (which performs the single OutputStream write).
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 log = logging.getLogger("traxus.remote_sink")
 
 if TYPE_CHECKING:
-    import sounddevice as sd
     from aiortc import AudioStreamTrack
+    from client.audio_mixer import AudioMixer
 
 
 class RemoteAudioSink:
@@ -27,18 +27,16 @@ class RemoteAudioSink:
         self,
         track: "AudioStreamTrack",
         username: str,
-        out_stream_holder: list,
+        mixer: "AudioMixer",
         volume_dict: dict[str, int],
     ) -> None:
         self._track = track
         self._username = username
-        self._out_stream_holder = out_stream_holder
+        self._mixer = mixer
         self._volume_dict = volume_dict
 
     async def run(self) -> None:
-        import asyncio
         import numpy as np
-        loop = asyncio.get_running_loop()
         try:
             from aiortc.mediastreams import MediaStreamError
         except ImportError:
@@ -64,13 +62,7 @@ class RemoteAudioSink:
                         -32768, 32767,
                     ).astype(np.int16)
 
-                try:
-                    # Capture stream reference before awaiting so a concurrent
-                    # holder swap picks up the new stream on the next iteration.
-                    stream = self._out_stream_holder[0]
-                    await loop.run_in_executor(None, stream.write, pcm)
-                except Exception:
-                    pass  # stream swapped or stopped; drop this frame
+                self._mixer.push(self._username, pcm)
         except MediaStreamError:
             pass  # track ended cleanly
         except Exception:

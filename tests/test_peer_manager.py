@@ -1,14 +1,15 @@
 """
-Unit tests for client/peer_manager.py (tasks 6.9, 12.7).
+Unit tests for client/peer_manager.py.
 
-Uses mocked RTCPeerConnection and WsWorker.
+Uses mocked RTCPeerConnection, AudioMixer, and WsWorker.
 Tests:
-  - connect() creates PC, adds MicTrack, sends voice_offer
-  - on_offer() answers incoming offer, sends voice_answer
+  - connect() creates PC, adds MicTrack, sends voice_offer, calls mixer.add_user
+  - on_offer() answers incoming offer, sends voice_answer, calls mixer.add_user
   - on_answer() sets remote description on existing PC
   - on_ice() adds ICE candidate to existing PC
-  - disconnect() closes PC and cancels sink task
-  - close_all() closes all PCs
+  - disconnect() closes PC, cancels sink task, calls mixer.remove_user
+  - close_all() closes all PCs, stops MicTrack, calls mixer.close
+  - restart_output_stream() delegates to mixer
   - ICE candidate events send voice_ice via WsWorker
 """
 from __future__ import annotations
@@ -54,6 +55,16 @@ def _make_mock_pc():
     return pc
 
 
+def _make_mock_mixer():
+    """Build a minimal AudioMixer mock."""
+    mixer = MagicMock()
+    mixer.add_user = MagicMock()
+    mixer.remove_user = MagicMock()
+    mixer.restart_output_stream = MagicMock()
+    mixer.close = AsyncMock()
+    return mixer
+
+
 def _make_peer_manager(mock_pc=None):
     """Build a PeerManager with mocked dependencies."""
     if mock_pc is None:
@@ -62,7 +73,7 @@ def _make_peer_manager(mock_pc=None):
     mic_track = MagicMock()
     mic_track.stop = MagicMock()
 
-    out_stream = MagicMock()
+    mixer = _make_mock_mixer()
     ws_worker = MagicMock()
     ws_worker.enqueue = MagicMock()
 
@@ -70,9 +81,9 @@ def _make_peer_manager(mock_pc=None):
          patch("aiortc.RTCConfiguration"), \
          patch("aiortc.RTCIceServer"):
         from client.peer_manager import PeerManager
-        pm = PeerManager(mic_track, out_stream, ws_worker, stun_url="stun:test")
+        pm = PeerManager(mic_track, mixer, ws_worker, stun_url="stun:test")
 
-    return pm, mic_track, ws_worker, mock_pc
+    return pm, mic_track, ws_worker, mock_pc, mixer
 
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc not available")
@@ -80,7 +91,7 @@ class TestPeerManagerConnect(unittest.IsolatedAsyncioTestCase):
 
     async def test_connect_sends_voice_offer(self):
         mock_pc = _make_mock_pc()
-        pm, mic_track, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, mic_track, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
@@ -93,7 +104,7 @@ class TestPeerManagerConnect(unittest.IsolatedAsyncioTestCase):
 
     async def test_connect_adds_mic_track(self):
         mock_pc = _make_mock_pc()
-        pm, mic_track, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, mic_track, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
@@ -102,22 +113,30 @@ class TestPeerManagerConnect(unittest.IsolatedAsyncioTestCase):
 
     async def test_connect_stores_peer(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
 
         self.assertIn("bob", pm._peers)
 
+    async def test_connect_calls_mixer_add_user(self):
+        mock_pc = _make_mock_pc()
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
+
+        with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
+            await pm.connect("bob")
+
+        mixer.add_user.assert_called_once_with("bob")
+
     async def test_connect_idempotent_on_duplicate(self):
         mock_pc = _make_mock_pc()
-        pm, _, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, _, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
             await pm.connect("bob")  # second call should be a no-op
 
-        # Only one offer should be sent
         self.assertEqual(ws_worker.enqueue.call_count, 1)
 
 
@@ -126,7 +145,7 @@ class TestPeerManagerOnOffer(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_offer_sends_voice_answer(self):
         mock_pc = _make_mock_pc()
-        pm, mic_track, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, mic_track, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc), \
              patch("aiortc.RTCSessionDescription"):
@@ -139,7 +158,7 @@ class TestPeerManagerOnOffer(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_offer_sets_remote_description(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc), \
              patch("aiortc.RTCSessionDescription") as MockSDP:
@@ -150,7 +169,7 @@ class TestPeerManagerOnOffer(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_offer_creates_answer(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc), \
              patch("aiortc.RTCSessionDescription"):
@@ -158,15 +177,24 @@ class TestPeerManagerOnOffer(unittest.IsolatedAsyncioTestCase):
 
         mock_pc.createAnswer.assert_awaited_once()
 
+    async def test_on_offer_calls_mixer_add_user(self):
+        mock_pc = _make_mock_pc()
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
+
+        with patch("aiortc.RTCPeerConnection", return_value=mock_pc), \
+             patch("aiortc.RTCSessionDescription"):
+            await pm.on_offer("alice", "offer-sdp")
+
+        mixer.add_user.assert_called_once_with("alice")
+
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc not available")
 class TestPeerManagerOnAnswer(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_answer_sets_remote_description(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
-        # Manually plant a peer entry
         pm._peers["bob"] = mock_pc
 
         with patch("aiortc.RTCSessionDescription") as MockSDP:
@@ -177,7 +205,7 @@ class TestPeerManagerOnAnswer(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_answer_no_op_for_unknown_peer(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCSessionDescription"):
             await pm.on_answer("nobody", "sdp")  # must not raise
@@ -190,7 +218,7 @@ class TestPeerManagerDisconnect(unittest.IsolatedAsyncioTestCase):
 
     async def test_disconnect_closes_pc(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
         pm._peers["bob"] = mock_pc
 
         await pm.disconnect("bob")
@@ -198,9 +226,18 @@ class TestPeerManagerDisconnect(unittest.IsolatedAsyncioTestCase):
         mock_pc.close.assert_awaited_once()
         self.assertNotIn("bob", pm._peers)
 
+    async def test_disconnect_calls_mixer_remove_user(self):
+        mock_pc = _make_mock_pc()
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
+        pm._peers["bob"] = mock_pc
+
+        await pm.disconnect("bob")
+
+        mixer.remove_user.assert_called_once_with("bob")
+
     async def test_disconnect_no_op_for_unknown_peer(self):
         mock_pc = _make_mock_pc()
-        pm, _, _, _ = _make_peer_manager(mock_pc)
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
 
         await pm.disconnect("nobody")  # must not raise
         mock_pc.close.assert_not_awaited()
@@ -208,7 +245,7 @@ class TestPeerManagerDisconnect(unittest.IsolatedAsyncioTestCase):
     async def test_close_all_closes_every_peer(self):
         mock_pc1 = _make_mock_pc()
         mock_pc2 = _make_mock_pc()
-        pm, mic_track, _, _ = _make_peer_manager(mock_pc1)
+        pm, mic_track, _, _, mixer = _make_peer_manager(mock_pc1)
         pm._peers = {"alice": mock_pc1, "bob": mock_pc2}
 
         await pm.close_all()
@@ -219,32 +256,47 @@ class TestPeerManagerDisconnect(unittest.IsolatedAsyncioTestCase):
 
     async def test_close_all_stops_mic_track(self):
         mock_pc = _make_mock_pc()
-        pm, mic_track, _, _ = _make_peer_manager(mock_pc)
+        pm, mic_track, _, _, mixer = _make_peer_manager(mock_pc)
 
         await pm.close_all()
 
         mic_track.stop.assert_called_once()
+
+    async def test_close_all_calls_mixer_close(self):
+        mock_pc = _make_mock_pc()
+        pm, _, _, _, mixer = _make_peer_manager(mock_pc)
+
+        await pm.close_all()
+
+        mixer.close.assert_awaited_once()
+
+    async def test_restart_output_stream_delegates_to_mixer(self):
+        pm, _, _, _, mixer = _make_peer_manager()
+
+        pm.restart_output_stream("my-device")
+
+        mixer.restart_output_stream.assert_called_once_with("my-device")
 
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc not available")
 class TestPeerManagerVolume(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_volume_100(self):
-        pm, _, _, _ = _make_peer_manager()
+        pm, _, _, _, mixer = _make_peer_manager()
         self.assertEqual(pm.get_volume("alice"), 100)
 
     async def test_set_and_get_volume(self):
-        pm, _, _, _ = _make_peer_manager()
+        pm, _, _, _, mixer = _make_peer_manager()
         pm.set_volume("alice", 75)
         self.assertEqual(pm.get_volume("alice"), 75)
 
     async def test_volume_clamped_to_200(self):
-        pm, _, _, _ = _make_peer_manager()
+        pm, _, _, _, mixer = _make_peer_manager()
         pm.set_volume("alice", 300)
         self.assertEqual(pm.get_volume("alice"), 200)
 
     async def test_volume_clamped_to_0(self):
-        pm, _, _, _ = _make_peer_manager()
+        pm, _, _, _, mixer = _make_peer_manager()
         pm.set_volume("alice", -10)
         self.assertEqual(pm.get_volume("alice"), 0)
 
@@ -254,12 +306,11 @@ class TestIceCandidateEvent(unittest.IsolatedAsyncioTestCase):
 
     async def test_ice_candidate_event_enqueues_voice_ice(self):
         mock_pc = _make_mock_pc()
-        pm, _, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, _, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
 
-        # Simulate ICE candidate event
         candidate = MagicMock()
         candidate.to_sdp.return_value = "1 1 UDP 123 192.168.1.1 50000 typ host"
         candidate.sdpMid = "audio"
@@ -278,7 +329,7 @@ class TestIceCandidateEvent(unittest.IsolatedAsyncioTestCase):
 
     async def test_null_ice_candidate_not_sent(self):
         mock_pc = _make_mock_pc()
-        pm, _, ws_worker, _ = _make_peer_manager(mock_pc)
+        pm, _, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
@@ -288,7 +339,6 @@ class TestIceCandidateEvent(unittest.IsolatedAsyncioTestCase):
         for handler in mock_pc._ice_handlers:
             handler(None)  # end-of-candidates
 
-        # No VOICE_ICE should be sent for null candidate
         ice_calls = [
             c for c in ws_worker.enqueue.call_args_list
             if c[0][0].get("type") == C2S.VOICE_ICE

@@ -220,9 +220,11 @@ async def sender_main(args) -> None:
 
             mic        = MicTrack(loop)
             out_stream = MagicMock()   # sender doesn't play back
+            from client.audio_mixer import AudioMixer
+            mixer = AudioMixer(out_stream)
             pm = PeerManager(
                 mic_track=mic,
-                out_stream=out_stream,
+                mixer=mixer,
                 ws_worker=_WsAdapter(ws),
                 stun_url="",
             )
@@ -281,9 +283,11 @@ async def receiver_main(args) -> None:
 
             mic        = MicTrack(loop)
             out_stream = _make_capture_stream(captured)
+            from client.audio_mixer import AudioMixer
+            mixer = AudioMixer(out_stream)
             pm = PeerManager(
                 mic_track=mic,
-                out_stream=out_stream,
+                mixer=mixer,
                 ws_worker=_WsAdapter(ws),
                 stun_url="",
             )

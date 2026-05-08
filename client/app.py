@@ -409,10 +409,12 @@ class TraxusApp(App):
                 _out_kwargs.pop("device", None)
                 out_stream = sd.OutputStream(**_out_kwargs)
             out_stream.start()
+            from client.audio_mixer import AudioMixer
+            mixer = AudioMixer(out_stream)
             mic = MicTrack(loop, device=self._input_device)
             self._peer_manager = PeerManager(
                 mic_track=mic,
-                out_stream=out_stream,
+                mixer=mixer,
                 ws_worker=self._ws_worker,  # type: ignore[arg-type]
                 stun_url=self._stun_server,
             )

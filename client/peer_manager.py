@@ -2,7 +2,7 @@
 PeerManager — manages RTCPeerConnection lifecycle for voice channels.
 
 One PeerManager exists while the local client is in a voice channel.
-It owns the MicTrack, creates/closes peer connections on join/leave events,
+It owns the AudioMixer, creates/closes peer connections on join/leave events,
 and routes signaling messages (offer/answer/ICE) received from the server.
 """
 from __future__ import annotations
@@ -17,8 +17,8 @@ from shared.message_types import C2S
 log = logging.getLogger("traxus.peers")
 
 if TYPE_CHECKING:
-    import sounddevice as sd
     from aiortc import RTCPeerConnection
+    from client.audio_mixer import AudioMixer
     from client.mic_track import MicTrack
     from client.ws_worker import WsWorker
 
@@ -27,13 +27,13 @@ class PeerManager:
     def __init__(
         self,
         mic_track: "MicTrack",
-        out_stream: "sd.OutputStream",
+        mixer: "AudioMixer",
         ws_worker: "WsWorker",
         stun_url: str = "stun:stun.l.google.com:19302",
     ) -> None:
         from aiortc import RTCConfiguration, RTCIceServer
         self._mic_track = mic_track
-        self._out_stream = out_stream
+        self._mixer = mixer
         self._ws_worker = ws_worker
         self._config = RTCConfiguration(
             iceServers=[RTCIceServer(urls=[stun_url])]
@@ -41,7 +41,6 @@ class PeerManager:
         self._peers: dict[str, RTCPeerConnection] = {}
         self._sink_tasks: dict[str, asyncio.Task] = {}
         self._volume: dict[str, int] = {}
-        self._out_stream_holder: list = [out_stream]
 
     @property
     def mic_track(self) -> "MicTrack":
@@ -53,6 +52,7 @@ class PeerManager:
         """Create an RTCPeerConnection to a remote participant and send offer."""
         if username in self._peers:
             return
+        self._mixer.add_user(username)
         pc = await self._create_pc(username)
         pc.addTrack(self._mic_track)
         offer = await pc.createOffer()
@@ -70,6 +70,8 @@ class PeerManager:
         """Handle an incoming SDP offer; create answer and start sink."""
         if from_user in self._peers:
             await self._peers[from_user].close()
+            self._mixer.remove_user(from_user)
+        self._mixer.add_user(from_user)
         pc = await self._create_pc(from_user)
         pc.addTrack(self._mic_track)
 
@@ -126,6 +128,7 @@ class PeerManager:
         pc = self._peers.pop(username, None)
         if pc:
             await pc.close()
+        self._mixer.remove_user(username)
         log.debug("Disconnected peer %s", username)
 
     # ── Close all peers (voice leave) ─────────────────────────────────────────
@@ -135,44 +138,12 @@ class PeerManager:
         for username in usernames:
             await self.disconnect(username)
         self._mic_track.stop()
-        try:
-            self._out_stream_holder[0].stop()
-            self._out_stream_holder[0].close()
-        except Exception:
-            pass
+        await self._mixer.close()
 
     # ── Output device hot-swap ────────────────────────────────────────────────
 
     def restart_output_stream(self, device: "str | None") -> None:
-        """Replace the shared OutputStream with a new one on the given device.
-
-        Order: open new → swap holder → wait one frame → close old.
-        This avoids Pa_StopStream racing with a live Pa_WriteStream on the
-        event loop thread, which causes a multi-second hang on Windows WASAPI.
-        """
-        import time
-        import sounddevice as sd
-        old_stream = self._out_stream_holder[0]
-        kwargs: dict = dict(samplerate=48000, channels=1, dtype="int16", latency=0.08)
-        if device is not None:
-            kwargs["device"] = device
-        try:
-            new_stream = sd.OutputStream(**kwargs)
-        except Exception:
-            kwargs.pop("device", None)
-            new_stream = sd.OutputStream(**kwargs)
-        new_stream.start()
-        # Atomic swap: RemoteAudioSink picks up new_stream on its next frame.
-        self._out_stream_holder[0] = new_stream
-        # Wait for any write() already in flight on old_stream to finish before
-        # stopping it. write() is now in an executor and blocks ≤20 ms per frame;
-        # 60 ms (3×) gives safe margin even if the event loop was slow to schedule.
-        time.sleep(0.060)
-        try:
-            old_stream.stop()
-            old_stream.close()
-        except Exception:
-            pass
+        self._mixer.restart_output_stream(device)
 
     # ── Per-peer volume ───────────────────────────────────────────────────────
 
@@ -205,7 +176,7 @@ class PeerManager:
         def on_track(track) -> None:
             if track.kind == "audio":
                 from client.remote_audio_sink import RemoteAudioSink
-                sink = RemoteAudioSink(track, username, self._out_stream_holder, self._volume)
+                sink = RemoteAudioSink(track, username, self._mixer, self._volume)
                 task = asyncio.ensure_future(sink.run())
                 self._sink_tasks[username] = task
 

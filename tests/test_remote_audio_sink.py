@@ -5,7 +5,7 @@ Tests:
   - Volume gain is applied correctly at levels other than 100
   - 100% volume leaves PCM unchanged (fast path)
   - Graceful exit when track raises MediaStreamError
-  - Writes go through the out_stream_holder[0] reference
+  - push() is called on the AudioMixer with correct PCM
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import asyncio
 import sys
 import os
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -35,21 +35,26 @@ def _make_frame(samples: np.ndarray) -> "av.AudioFrame":
     return frame
 
 
+def _make_mixer():
+    """Build a minimal AudioMixer mock."""
+    mixer = MagicMock()
+    mixer.push = MagicMock()
+    return mixer
+
+
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
 class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
-    """Volume gain is applied to outgoing PCM."""
+    """Volume gain is applied to PCM before pushing to the mixer."""
 
     def _make_sink(self, volume_level: int, username: str = "alice"):
         from client.remote_audio_sink import RemoteAudioSink
         track = MagicMock()
-        out_stream = MagicMock()
-        out_stream.write = MagicMock()
-        holder = [out_stream]
+        mixer = _make_mixer()
         volume_dict = {username: volume_level}
-        return RemoteAudioSink(track, username, holder, volume_dict), track, out_stream
+        return RemoteAudioSink(track, username, mixer, volume_dict), track, mixer
 
     async def test_100_percent_leaves_pcm_unchanged(self):
-        sink, track, out_stream = self._make_sink(100)
+        sink, track, mixer = self._make_sink(100)
         pcm = np.ones(320, dtype=np.int16) * 1000
 
         frames = [_make_frame(pcm)]
@@ -62,11 +67,12 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         track.recv = AsyncMock(side_effect=recv_side_effect)
         await sink.run()
 
-        written = out_stream.write.call_args[0][0]
-        np.testing.assert_array_equal(written, pcm)
+        mixer.push.assert_called_once()
+        _, pushed = mixer.push.call_args[0]
+        np.testing.assert_array_equal(pushed, pcm)
 
     async def test_50_percent_halves_amplitude(self):
-        sink, track, out_stream = self._make_sink(50)
+        sink, track, mixer = self._make_sink(50)
         pcm = np.ones(320, dtype=np.int16) * 1000
 
         frames = [_make_frame(pcm)]
@@ -79,12 +85,13 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         track.recv = AsyncMock(side_effect=recv_side_effect)
         await sink.run()
 
-        written = out_stream.write.call_args[0][0]
+        mixer.push.assert_called_once()
+        _, pushed = mixer.push.call_args[0]
         expected = np.clip(pcm.astype(np.float32) * 0.5, -32768, 32767).astype(np.int16)
-        np.testing.assert_array_equal(written, expected)
+        np.testing.assert_array_equal(pushed, expected)
 
     async def test_200_percent_doubles_amplitude(self):
-        sink, track, out_stream = self._make_sink(200)
+        sink, track, mixer = self._make_sink(200)
         pcm = np.ones(320, dtype=np.int16) * 1000
 
         frames = [_make_frame(pcm)]
@@ -97,12 +104,13 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         track.recv = AsyncMock(side_effect=recv_side_effect)
         await sink.run()
 
-        written = out_stream.write.call_args[0][0]
+        mixer.push.assert_called_once()
+        _, pushed = mixer.push.call_args[0]
         expected = np.clip(pcm.astype(np.float32) * 2.0, -32768, 32767).astype(np.int16)
-        np.testing.assert_array_equal(written, expected)
+        np.testing.assert_array_equal(pushed, expected)
 
     async def test_zero_volume_gives_silence(self):
-        sink, track, out_stream = self._make_sink(0)
+        sink, track, mixer = self._make_sink(0)
         pcm = np.ones(320, dtype=np.int16) * 5000
 
         frames = [_make_frame(pcm)]
@@ -115,8 +123,9 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         track.recv = AsyncMock(side_effect=recv_side_effect)
         await sink.run()
 
-        written = out_stream.write.call_args[0][0]
-        self.assertTrue((written == 0).all(), "Volume=0 must produce silence")
+        mixer.push.assert_called_once()
+        _, pushed = mixer.push.call_args[0]
+        self.assertTrue((pushed == 0).all(), "Volume=0 must produce silence")
 
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
@@ -128,8 +137,8 @@ class TestRemoteAudioSinkExit(unittest.IsolatedAsyncioTestCase):
 
         track = MagicMock()
         track.recv = AsyncMock(side_effect=aiortc.mediastreams.MediaStreamError())
-        out_stream = MagicMock()
-        sink = RemoteAudioSink(track, "bob", [out_stream], {})
+        mixer = _make_mixer()
+        sink = RemoteAudioSink(track, "bob", mixer, {})
 
         try:
             await asyncio.wait_for(sink.run(), timeout=2.0)
@@ -149,19 +158,18 @@ class TestRemoteAudioSinkExit(unittest.IsolatedAsyncioTestCase):
 
         track = MagicMock()
         track.recv = AsyncMock(side_effect=recv)
-        out_stream = MagicMock()
-        sink = RemoteAudioSink(track, "alice", [out_stream], {})
+        mixer = _make_mixer()
+        sink = RemoteAudioSink(track, "alice", mixer, {})
         await sink.run()
 
-        self.assertEqual(out_stream.write.call_count, 3)
+        self.assertEqual(mixer.push.call_count, 3)
 
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
-class TestRemoteAudioSinkHolder(unittest.IsolatedAsyncioTestCase):
-    """Writes go through holder[0], so swapping the holder swaps the target stream."""
+class TestRemoteAudioSinkPush(unittest.IsolatedAsyncioTestCase):
+    """push() is called with the correct username and PCM on each frame."""
 
-    async def test_write_goes_to_holder_zero(self):
-        """Writes should call holder[0].write, not a stored stream reference."""
+    async def test_push_called_with_username(self):
         from client.remote_audio_sink import RemoteAudioSink
 
         pcm = np.ones(320, dtype=np.int16) * 500
@@ -174,44 +182,24 @@ class TestRemoteAudioSinkHolder(unittest.IsolatedAsyncioTestCase):
 
         track = MagicMock()
         track.recv = AsyncMock(side_effect=recv)
-        stream_a = MagicMock()
-        holder = [stream_a]
-        sink = RemoteAudioSink(track, "alice", holder, {})
+        mixer = _make_mixer()
+        sink = RemoteAudioSink(track, "alice", mixer, {})
         await sink.run()
 
-        self.assertTrue(stream_a.write.called)
+        mixer.push.assert_called_once()
+        username_arg, _ = mixer.push.call_args[0]
+        self.assertEqual(username_arg, "alice")
 
-    async def test_write_follows_swapped_holder(self):
-        """After swapping holder[0], writes go to the new stream."""
+    async def test_no_push_on_immediate_track_end(self):
         from client.remote_audio_sink import RemoteAudioSink
 
-        pcm = np.ones(320, dtype=np.int16) * 500
-        frames = [_make_frame(pcm), _make_frame(pcm)]
-
-        stream_a = MagicMock()
-        stream_b = MagicMock()
-        holder = [stream_a]
-
-        call_count = 0
-
-        async def recv():
-            nonlocal call_count
-            if frames:
-                call_count += 1
-                f = frames.pop(0)
-                if call_count == 1:
-                    # Swap AFTER first frame is returned so first write goes to stream_a,
-                    # second write goes to stream_b.
-                    holder[0] = stream_b
-                return f
-            raise aiortc.mediastreams.MediaStreamError()
-
         track = MagicMock()
-        track.recv = AsyncMock(side_effect=recv)
-        sink = RemoteAudioSink(track, "alice", holder, {})
+        track.recv = AsyncMock(side_effect=aiortc.mediastreams.MediaStreamError())
+        mixer = _make_mixer()
+        sink = RemoteAudioSink(track, "alice", mixer, {})
         await sink.run()
 
-        self.assertTrue(stream_b.write.called, "second frame should go to stream_b after swap")
+        mixer.push.assert_not_called()
 
 
 if __name__ == "__main__":
