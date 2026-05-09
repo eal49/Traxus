@@ -58,7 +58,7 @@ class RemoteAudioSink:
                 level = self._volume_dict.get(self._username, 100)
                 if level != 100:
                     pcm = np.clip(
-                        pcm.astype(np.float32) * (level / 100.0),
+                        pcm.astype(np.float32) * ((level / 100.0) ** 2),
                         -32768, 32767,
                     ).astype(np.int16)
 

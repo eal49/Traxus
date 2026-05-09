@@ -34,24 +34,28 @@
 
 ---
 
-### Requirement: Playback worker applies per-user gain to decoded PCM
-The `_playback_worker` thread SHALL apply a float gain derived from `_per_user_volume` to the decoded int16 PCM array before writing it to the output stream. Gain = level / 100.0. The result SHALL be hard-clipped to the int16 range [−32768, 32767].
+### Requirement: Per-participant volume applies a squared power-law gain curve
+The gain applied in `RemoteAudioSink` SHALL follow a squared power-law curve:
+`gain = (level / 100) ** 2`, where `level` is the integer volume value (0–200).
+This matches perceptual loudness expectations: 100 % is unity (0 dB), 200 % is
++12 dB (4×), and 50 % is −12 dB (0.25×). A `level` of exactly 100 SHALL bypass
+the multiply entirely (fast-path).
 
-#### Scenario: 100% gain leaves PCM unchanged
-- **WHEN** `_per_user_volume` for the sending user is 100 (or absent)
-- **THEN** the PCM array written to the output stream SHALL be identical to the decoded PCM
+#### Scenario: 200 % volume delivers approximately +12 dB boost
+- **WHEN** the volume for a participant is set to 200
+- **THEN** each decoded PCM sample SHALL be multiplied by 4.0 (clipped to int16 range)
 
-#### Scenario: 50% gain halves amplitude
-- **WHEN** `_per_user_volume` for the sending user is 50
-- **THEN** each sample in the output PCM SHALL equal `round(input_sample * 0.5)` (within int16 rounding)
+#### Scenario: 100 % volume is unity gain
+- **WHEN** the volume for a participant is set to 100
+- **THEN** the PCM samples SHALL be passed through unchanged (no multiply)
 
-#### Scenario: 200% gain doubles amplitude with clipping
-- **WHEN** `_per_user_volume` for the sending user is 200 and input contains samples near the int16 limit
-- **THEN** output samples SHALL be hard-clipped to [−32768, 32767] with no exception raised
+#### Scenario: 50 % volume quarters amplitude
+- **WHEN** the volume for a participant is set to 50
+- **THEN** each decoded PCM sample SHALL be multiplied by 0.25
 
-#### Scenario: 0% gain produces silence
-- **WHEN** `_per_user_volume` for the sending user is 0
-- **THEN** all output samples SHALL be 0
+#### Scenario: 0 % volume produces silence
+- **WHEN** the volume for a participant is set to 0
+- **THEN** all PCM samples SHALL be zero regardless of input level
 
 ---
 

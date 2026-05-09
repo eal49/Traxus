@@ -71,7 +71,7 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
         _, pushed = mixer.push.call_args[0]
         np.testing.assert_array_equal(pushed, pcm)
 
-    async def test_50_percent_halves_amplitude(self):
+    async def test_50_percent_quarters_amplitude(self):
         sink, track, mixer = self._make_sink(50)
         pcm = np.ones(320, dtype=np.int16) * 1000
 
@@ -87,10 +87,10 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
 
         mixer.push.assert_called_once()
         _, pushed = mixer.push.call_args[0]
-        expected = np.clip(pcm.astype(np.float32) * 0.5, -32768, 32767).astype(np.int16)
+        expected = np.clip(pcm.astype(np.float32) * 0.25, -32768, 32767).astype(np.int16)
         np.testing.assert_array_equal(pushed, expected)
 
-    async def test_200_percent_doubles_amplitude(self):
+    async def test_200_percent_quadruples_amplitude(self):
         sink, track, mixer = self._make_sink(200)
         pcm = np.ones(320, dtype=np.int16) * 1000
 
@@ -106,7 +106,7 @@ class TestRemoteAudioSinkVolumeGain(unittest.IsolatedAsyncioTestCase):
 
         mixer.push.assert_called_once()
         _, pushed = mixer.push.call_args[0]
-        expected = np.clip(pcm.astype(np.float32) * 2.0, -32768, 32767).astype(np.int16)
+        expected = np.clip(pcm.astype(np.float32) * 4.0, -32768, 32767).astype(np.int16)
         np.testing.assert_array_equal(pushed, expected)
 
     async def test_zero_volume_gives_silence(self):
