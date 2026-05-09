@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: AudioMixer owns the OutputStream and is the sole writer
 The system SHALL implement an `AudioMixer` class in `client/audio_mixer.py` that is the exclusive writer to the `sd.OutputStream`. No other component SHALL call `stream.write()` directly for remote audio playback. `AudioMixer` SHALL start an internal asyncio task (`run()`) that writes one mixed PCM frame to the OutputStream every 20 ms.
@@ -26,7 +26,7 @@ The AudioMixer SHALL sum PCM frames from all active user slots as `float32` arra
 
 #### Scenario: No speakers produces silence
 - **WHEN** no user has a queued frame
-- **THEN** the mixer SHALL write a zeroed int16 frame of the standard frame size (320 samples at 16 kHz)
+- **THEN** the mixer SHALL write a zeroed int16 frame of the standard frame size
 
 ---
 
@@ -58,7 +58,7 @@ The AudioMixer SHALL expose `add_user(username: str)` and `remove_user(username:
 ---
 
 ### Requirement: AudioMixer supports output device hot-swap
-The AudioMixer SHALL expose `restart_output_stream(device: str | None)` that replaces the internal `sd.OutputStream` atomically: open new stream, swap reference, wait one frame budget, close old stream. This matches the current `PeerManager.restart_output_stream` behaviour.
+The AudioMixer SHALL expose `restart_output_stream(device: str | None)` that replaces the internal `sd.OutputStream` atomically: open new stream, swap reference, wait one frame budget, close old stream.
 
 #### Scenario: Device swap does not interrupt playback for connected peers
 - **WHEN** `restart_output_stream` is called while peers are active

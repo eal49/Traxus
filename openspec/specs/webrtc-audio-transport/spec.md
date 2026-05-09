@@ -38,22 +38,38 @@ The client SHALL implement a `MicTrack` subclass of `aiortc.AudioStreamTrack` th
 
 ---
 
-### Requirement: RemoteAudioSink bridges WebRTC receive to sounddevice playback
-The client SHALL implement a `RemoteAudioSink` coroutine that reads decoded `av.AudioFrame` objects from a remote `RTCPeerConnection` audio track and writes the PCM samples to the shared `sd.OutputStream`.
+### Requirement: Each RTCPeerConnection receives an independent MicFork
+The client SHALL use a `MicFork` fan-out pattern so that each `RTCPeerConnection` is given its own independent `AudioStreamTrack` instance (`MicFork`) rather than sharing the same `MicTrack` object. Each `MicFork` SHALL have its own `asyncio.Queue` and PTS counter so that concurrent `recv()` calls from multiple aiortc encoding coroutines do not compete for frames or advance a shared timestamp.
 
-#### Scenario: Remote audio frames play through OutputStream
+#### Scenario: Two simultaneous peers each receive the complete audio stream
+- **WHEN** the local client is connected to two or more remote participants simultaneously
+- **THEN** each `RTCPeerConnection` SHALL have a distinct `MicFork` added via `addTrack()`
+- **THEN** every sounddevice frame SHALL be delivered to ALL registered forks
+- **THEN** each peer SHALL receive every captured frame without loss or round-robin splitting
+
+#### Scenario: Fork cleaned up on peer disconnect
+- **WHEN** a remote participant's connection is closed
+- **THEN** the associated `MicFork` SHALL be removed from the fan-out list via `MicTrack.unfork()`
+- **THEN** subsequent sounddevice frames SHALL NOT be delivered to the removed fork's queue
+
+---
+
+### Requirement: RemoteAudioSink bridges WebRTC receive to sounddevice playback
+The client SHALL implement a `RemoteAudioSink` coroutine that reads decoded `av.AudioFrame` objects from a remote `RTCPeerConnection` audio track, applies per-participant volume gain, and pushes the resulting int16 PCM to the shared `AudioMixer` via `mixer.push(username, pcm)`. `RemoteAudioSink` SHALL NOT write to `sd.OutputStream` directly.
+
+#### Scenario: Remote audio frames are pushed to the AudioMixer
 - **WHEN** a remote `AudioStreamTrack` produces an `av.AudioFrame`
-- **THEN** the decoded int16 PCM samples SHALL be written to the shared `sd.OutputStream`
-- **THEN** per-participant volume gain SHALL be applied before writing
+- **THEN** the decoded int16 PCM samples SHALL be pushed to `AudioMixer` for that participant
+- **THEN** per-participant volume gain SHALL be applied before pushing
 
 #### Scenario: Per-participant volume applies to remote track
 - **WHEN** the user adjusts a participant's volume via the MemberPanel
-- **THEN** the gain applied in `RemoteAudioSink` for that participant SHALL update immediately
+- **THEN** the gain applied in `RemoteAudioSink` for that participant SHALL update immediately on the next frame
 
 #### Scenario: Sink stops on connection close
 - **WHEN** the associated `RTCPeerConnection` closes
 - **THEN** the `RemoteAudioSink` coroutine SHALL exit cleanly
-- **THEN** no further audio is written to the OutputStream for that participant
+- **THEN** no further frames are pushed to the AudioMixer for that participant
 
 ---
 
