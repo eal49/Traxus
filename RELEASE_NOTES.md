@@ -1,3 +1,13 @@
+## What's new in v0.2.8
+
+- **Perceptual volume curve** — the per-participant volume slider now uses a
+  squared power-law gain curve (`gain = (level / 100) ** 2`) instead of a
+  linear one. At 200 % the boost is +12 dB (4×) rather than +6 dB (2×), and
+  at 50 % the cut is −12 dB (0.25×) rather than −6 dB (0.5×). The curve is
+  symmetric in log-space around unity: 50 % is now the true perceptual inverse
+  of 200 %, matching how human hearing experiences loudness. The 100 % fast-path
+  (no multiply) is preserved.
+
 ## What's new in v0.2.7
 
 - **Multi-peer microphone fan-out fixed** — audio sent by a local client is now
