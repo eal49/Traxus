@@ -55,6 +55,7 @@ class MicTrack(AudioStreamTrack):
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._pts: int = 0
         self._start: float | None = None  # wall-clock origin for pacing
+        self._fork_queues: list[asyncio.Queue] = []
 
         self._stream = self._open_stream(device)
 
@@ -95,6 +96,11 @@ class MicTrack(AudioStreamTrack):
             self._queue.put_nowait(raw)
         except asyncio.QueueFull:
             pass  # consumer is lagging; drop frame to avoid blocking the event loop
+        for q in self._fork_queues:
+            try:
+                q.put_nowait(raw)
+            except asyncio.QueueFull:
+                pass
 
     # ── aiortc AudioStreamTrack interface ─────────────────────────────────────
 
@@ -131,6 +137,21 @@ class MicTrack(AudioStreamTrack):
         self._pts += _BLOCKSIZE
         return frame
 
+    # ── Fan-out forks ─────────────────────────────────────────────────────────
+
+    def fork(self) -> "MicFork":
+        """Create an independent fan-out branch for one RTCPeerConnection."""
+        f = MicFork()
+        self._fork_queues.append(f._queue)
+        return f
+
+    def unfork(self, fork: "MicFork") -> None:
+        """Remove a fork from the fan-out list."""
+        try:
+            self._fork_queues.remove(fork._queue)
+        except ValueError:
+            pass
+
     def restart_stream(self, device: "str | None") -> None:
         """Swap the underlying InputStream for a new device without touching the queue or aiortc track."""
         try:
@@ -150,3 +171,51 @@ class MicTrack(AudioStreamTrack):
         except Exception:
             pass
         super().stop()
+
+
+class MicFork(AudioStreamTrack):
+    """
+    Independent fan-out branch of a MicTrack.
+
+    Each RTCPeerConnection gets its own MicFork so concurrent recv() calls
+    in aiortc's encoding coroutines don't compete for the same queue or
+    advance a shared PTS counter.  Created via MicTrack.fork().
+    """
+
+    kind = "audio"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
+        self._pts: int = 0
+        self._start: float | None = None
+
+    async def recv(self) -> "av.AudioFrame":
+        loop = asyncio.get_running_loop()
+        if self._start is None:
+            self._start = loop.time()
+        target = self._start + self._pts / _SAMPLERATE
+        wait = target - loop.time()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+        try:
+            raw = self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            raw = None
+
+        if raw is not None:
+            samples = np.frombuffer(raw, dtype=np.int16)
+        else:
+            samples = np.zeros(_BLOCKSIZE, dtype=np.int16)
+
+        frame = av.AudioFrame.from_ndarray(
+            samples.reshape(1, -1),
+            format="s16",
+            layout="mono",
+        )
+        frame.sample_rate = _SAMPLERATE
+        frame.pts = self._pts
+        frame.time_base = fractions.Fraction(1, _SAMPLERATE)
+        self._pts += _BLOCKSIZE
+        return frame

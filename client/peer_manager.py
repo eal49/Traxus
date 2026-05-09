@@ -19,7 +19,7 @@ log = logging.getLogger("traxus.peers")
 if TYPE_CHECKING:
     from aiortc import RTCPeerConnection
     from client.audio_mixer import AudioMixer
-    from client.mic_track import MicTrack
+    from client.mic_track import MicFork, MicTrack
     from client.ws_worker import WsWorker
 
 
@@ -39,6 +39,7 @@ class PeerManager:
             iceServers=[RTCIceServer(urls=[stun_url])]
         )
         self._peers: dict[str, RTCPeerConnection] = {}
+        self._forks: dict[str, "MicFork"] = {}
         self._sink_tasks: dict[str, asyncio.Task] = {}
         self._volume: dict[str, int] = {}
 
@@ -54,7 +55,9 @@ class PeerManager:
             return
         self._mixer.add_user(username)
         pc = await self._create_pc(username)
-        pc.addTrack(self._mic_track)
+        fork = self._mic_track.fork()
+        self._forks[username] = fork
+        pc.addTrack(fork)
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         self._ws_worker.enqueue({
@@ -71,9 +74,13 @@ class PeerManager:
         if from_user in self._peers:
             await self._peers[from_user].close()
             self._mixer.remove_user(from_user)
+        if from_user in self._forks:
+            self._mic_track.unfork(self._forks.pop(from_user))
         self._mixer.add_user(from_user)
         pc = await self._create_pc(from_user)
-        pc.addTrack(self._mic_track)
+        fork = self._mic_track.fork()
+        self._forks[from_user] = fork
+        pc.addTrack(fork)
 
         from aiortc import RTCSessionDescription
         await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
@@ -125,6 +132,9 @@ class PeerManager:
         task = self._sink_tasks.pop(username, None)
         if task:
             task.cancel()
+        fork = self._forks.pop(username, None)
+        if fork is not None:
+            self._mic_track.unfork(fork)
         pc = self._peers.pop(username, None)
         if pc:
             await pc.close()

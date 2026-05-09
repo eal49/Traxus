@@ -43,21 +43,24 @@ class AudioMixer:
     def add_user(self, username: str) -> None:
         if username not in self._queues:
             self._queues[username] = asyncio.Queue(maxsize=_QUEUE_MAX)
+            log.debug("AudioMixer: added slot for %s (%d total)", username, len(self._queues))
 
     def remove_user(self, username: str) -> None:
-        self._queues.pop(username, None)
+        if self._queues.pop(username, None) is not None:
+            log.debug("AudioMixer: removed slot for %s (%d remaining)", username, len(self._queues))
 
     # ── Push interface for RemoteAudioSink ────────────────────────────────────
 
     def push(self, username: str, pcm: "np.ndarray") -> None:
         q = self._queues.get(username)
         if q is None:
+            log.debug("AudioMixer: push from %s ignored (no slot)", username)
             return
         self._frame_size = len(pcm)
         try:
             q.put_nowait(pcm)
         except asyncio.QueueFull:
-            pass  # sink is ahead of the mixer tick; drop oldest-equivalent
+            log.debug("AudioMixer: queue full for %s, dropping frame", username)
 
     # ── Mixer loop ────────────────────────────────────────────────────────────
 
@@ -67,27 +70,57 @@ class AudioMixer:
         start = loop.time()
         tick = 0
         while True:
-            tick += 1
-            target = start + tick * _FRAME_DURATION
-            wait = target - loop.time()
-            if wait > 0:
-                await asyncio.sleep(wait)
-
-            frame_size = self._frame_size
-            mixed = np.zeros(frame_size, dtype=np.float32)
-            for q in list(self._queues.values()):
-                try:
-                    frame = q.get_nowait()
-                    mixed += frame.astype(np.float32)
-                except asyncio.QueueEmpty:
-                    pass  # this user has no frame this tick; contribute silence
-
-            out = np.clip(mixed, -32768, 32767).astype(np.int16)
-            stream = self._stream_holder[0]
             try:
-                await loop.run_in_executor(None, stream.write, out)
+                tick += 1
+                target = start + tick * _FRAME_DURATION
+                wait = target - loop.time()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+
+                frame_size = self._frame_size
+                mixed = np.zeros(frame_size, dtype=np.float32)
+                n_mixed = 0
+                n_silent = 0
+
+                for username, q in list(self._queues.items()):
+                    try:
+                        frame = q.get_nowait()
+                        if len(frame) != frame_size:
+                            # Guard against unexpected frame sizes from the codec.
+                            # Truncate if too long; pad with zeros if too short.
+                            log.warning(
+                                "AudioMixer: frame size mismatch from %s "
+                                "(expected %d, got %d) — adjusting",
+                                username, frame_size, len(frame),
+                            )
+                            if len(frame) > frame_size:
+                                frame = frame[:frame_size]
+                            else:
+                                frame = np.pad(frame, (0, frame_size - len(frame)))
+                        mixed += frame.astype(np.float32)
+                        n_mixed += 1
+                    except asyncio.QueueEmpty:
+                        n_silent += 1
+
+                out = np.clip(mixed, -32768, 32767).astype(np.int16)
+
+                if tick % 50 == 0:  # once per second
+                    rms = float(np.sqrt(np.mean(out.astype(np.float64) ** 2)))
+                    log.debug(
+                        "AudioMixer tick %d: %d mixed / %d silent, rms=%.0f",
+                        tick, n_mixed, n_silent, rms,
+                    )
+
+                stream = self._stream_holder[0]
+                try:
+                    await loop.run_in_executor(None, stream.write, out)
+                except Exception:
+                    pass  # stream swapped or stopped; frame dropped
+
+            except asyncio.CancelledError:
+                raise  # let close() cancel us cleanly
             except Exception:
-                pass  # stream swapped or stopped; frame dropped
+                log.exception("AudioMixer._run: unhandled error at tick %d — continuing", tick)
 
     # ── Output device hot-swap ────────────────────────────────────────────────
 

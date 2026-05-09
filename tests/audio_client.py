@@ -237,17 +237,14 @@ async def sender_main(args) -> None:
             log.info("[%s] waiting %gs for ICE…", args.username, args.ice_wait)
             await asyncio.sleep(args.ice_wait)
 
-            frames = _gen_tone_frames(freq=440.0, n_frames=args.frames)
+            frames = _gen_tone_frames(freq=args.freq, n_frames=args.frames)
             mic.set_transmitting(True)
             # Pace injection at 20ms intervals, matching the real sounddevice
             # callback rate.  Without pacing the queue (maxsize=20) overflows
             # and MicTrack's pacing logic still only delivers 20 frames total.
             start = loop.time()
             for i, frame_bytes in enumerate(frames):
-                try:
-                    mic._queue.put_nowait(frame_bytes)
-                except asyncio.QueueFull:
-                    pass
+                mic._enqueue_safe(frame_bytes)
                 target = start + (i + 1) * 0.020
                 delay = target - loop.time()
                 if delay > 0:
@@ -324,6 +321,7 @@ def _parse_args():
     p.add_argument("--output",      default="/tmp/traxus_recv.raw")
     p.add_argument("--server",      default="ws://localhost:8765")
     p.add_argument("--frames",      type=int,   default=100)
+    p.add_argument("--freq",        type=float, default=440.0)
     p.add_argument("--ice-wait",    type=float, default=3.0, dest="ice_wait")
     p.add_argument("--audio-wait",  type=float, default=2.0, dest="audio_wait")
     p.add_argument("--buffer-wait", type=float, default=2.0, dest="buffer_wait")

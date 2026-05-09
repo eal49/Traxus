@@ -205,5 +205,107 @@ class TestMicTrackDevice(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_count, 3)
 
 
+@unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc/av/numpy not available")
+class TestMicFork(unittest.IsolatedAsyncioTestCase):
+    """MicFork — independent fan-out branch of MicTrack."""
+
+    async def test_fork_returns_mic_fork_instance(self):
+        from client.mic_track import MicFork, MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            track.stop()
+        self.assertIsInstance(fork, MicFork)
+
+    async def test_fork_queue_registered_in_mic_track(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            self.assertIn(fork._queue, track._fork_queues)
+            track.stop()
+
+    async def test_unfork_removes_queue(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            track.unfork(fork)
+            self.assertNotIn(fork._queue, track._fork_queues)
+            track.stop()
+
+    async def test_enqueue_safe_fans_out_to_fork(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            raw = np.ones(320, dtype=np.int16).tobytes()
+            track._enqueue_safe(raw)
+            track.stop()
+        self.assertFalse(fork._queue.empty())
+        self.assertEqual(fork._queue.get_nowait(), raw)
+
+    async def test_fork_recv_returns_queued_pcm(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            track.stop()
+        pcm = (np.ones(320, dtype=np.int16) * 500).tobytes()
+        await fork._queue.put(pcm)
+        frame = await fork.recv()
+        arr = frame.to_ndarray().flatten()
+        self.assertEqual(arr[0], 500)
+
+    async def test_fork_recv_returns_silence_when_empty(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            track.stop()
+        frame = await fork.recv()
+        arr = frame.to_ndarray()
+        self.assertTrue((arr == 0).all())
+
+    async def test_multiple_forks_each_receive_frames(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork_a = track.fork()
+            fork_b = track.fork()
+            raw = np.ones(320, dtype=np.int16).tobytes()
+            track._enqueue_safe(raw)
+            track.stop()
+        self.assertFalse(fork_a._queue.empty(), "fork_a must receive frame")
+        self.assertFalse(fork_b._queue.empty(), "fork_b must receive frame")
+
+    async def test_unfork_stops_frame_delivery(self):
+        from client.mic_track import MicTrack
+        loop = asyncio.get_running_loop()
+        with patch("sounddevice.InputStream") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            track = MicTrack(loop)
+            fork = track.fork()
+            track.unfork(fork)
+            raw = np.ones(320, dtype=np.int16).tobytes()
+            track._enqueue_safe(raw)
+            track.stop()
+        self.assertTrue(fork._queue.empty(), "unfork'd fork must not receive frames")
+
+
 if __name__ == "__main__":
     unittest.main()

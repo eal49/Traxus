@@ -102,14 +102,15 @@ class TestPeerManagerConnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["to_user"], "bob")
         self.assertIn("sdp", sent)
 
-    async def test_connect_adds_mic_track(self):
+    async def test_connect_adds_mic_fork(self):
         mock_pc = _make_mock_pc()
         pm, mic_track, ws_worker, _, mixer = _make_peer_manager(mock_pc)
 
         with patch("aiortc.RTCPeerConnection", return_value=mock_pc):
             await pm.connect("bob")
 
-        mock_pc.addTrack.assert_called_once_with(mic_track)
+        mic_track.fork.assert_called_once()
+        mock_pc.addTrack.assert_called_once_with(mic_track.fork.return_value)
 
     async def test_connect_stores_peer(self):
         mock_pc = _make_mock_pc()
@@ -187,6 +188,17 @@ class TestPeerManagerOnOffer(unittest.IsolatedAsyncioTestCase):
 
         mixer.add_user.assert_called_once_with("alice")
 
+    async def test_on_offer_adds_mic_fork(self):
+        mock_pc = _make_mock_pc()
+        pm, mic_track, _, _, mixer = _make_peer_manager(mock_pc)
+
+        with patch("aiortc.RTCPeerConnection", return_value=mock_pc), \
+             patch("aiortc.RTCSessionDescription"):
+            await pm.on_offer("alice", "offer-sdp")
+
+        mic_track.fork.assert_called_once()
+        mock_pc.addTrack.assert_called_once_with(mic_track.fork.return_value)
+
 
 @unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc not available")
 class TestPeerManagerOnAnswer(unittest.IsolatedAsyncioTestCase):
@@ -234,6 +246,20 @@ class TestPeerManagerDisconnect(unittest.IsolatedAsyncioTestCase):
         await pm.disconnect("bob")
 
         mixer.remove_user.assert_called_once_with("bob")
+
+    async def test_disconnect_calls_unfork(self):
+        mock_pc = _make_mock_pc()
+        pm, mic_track, _, _, mixer = _make_peer_manager(mock_pc)
+
+        # Simulate a connected peer with a registered fork
+        fake_fork = MagicMock()
+        pm._peers["bob"] = mock_pc
+        pm._forks["bob"] = fake_fork
+
+        await pm.disconnect("bob")
+
+        mic_track.unfork.assert_called_once_with(fake_fork)
+        self.assertNotIn("bob", pm._forks)
 
     async def test_disconnect_no_op_for_unknown_peer(self):
         mock_pc = _make_mock_pc()

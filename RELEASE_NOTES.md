@@ -1,3 +1,20 @@
+## What's new in v0.2.7
+
+- **Multi-peer microphone fan-out fixed** — audio sent by a local client is now
+  correctly delivered to every remote participant when 3 or more clients share a
+  voice channel. Previously the same `MicTrack` object was added to every
+  `RTCPeerConnection`; aiortc's per-connection encoding coroutines called
+  `recv()` concurrently on the shared object, causing frames to be split between
+  connections and the PTS counter to advance at N× the correct rate. Each
+  connection now gets its own `MicFork` — an independent `AudioStreamTrack` with
+  a separate queue and PTS counter — so every peer receives a complete,
+  correctly-timestamped copy of the microphone stream.
+- **AudioMixer mixing proved correct** — a new 3-client end-to-end test starts
+  a real server, an alice sender (440 Hz), a bob sender (880 Hz), and a charlie
+  receiver, then FFT-verifies that charlie's captured audio contains energy at
+  both 440 Hz and 880 Hz simultaneously, proving the mixer sums all active
+  speakers without losing any stream.
+
 ## What's new in v0.2.6
 
 - **Multi-peer voice fixed** — audio is now intelligible when 3 or more clients
