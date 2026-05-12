@@ -830,7 +830,7 @@ required.
 │                                                                      │
 │   ┌─────────┐         DNS query                                     │
 │   │ Client  ├──────────────────────►  Duck DNS                      │
-│   │         │◄──────────────────────  traxus.duckdns.org → VPS IP   │
+│   │         │◄──────────────────────  yourserver.example.com → VPS IP│
 │   └────┬────┘                                                        │
 │        │                                                             │
 │        │  TCP :443 (TLS/WSS)                                        │
@@ -910,14 +910,14 @@ Caddy handles TLS automatically:
 
 1. On first startup, Caddy requests a certificate from Let's Encrypt.
 2. Let's Encrypt issues an HTTP-01 challenge on port 80.
-3. Caddy solves the challenge and receives a certificate for `traxus.duckdns.org`.
+3. Caddy solves the challenge and receives a certificate for your domain.
 4. Caddy auto-renews the certificate before expiry (every ~60 days).
 5. No manual certificate management is ever required.
 
 **Caddyfile:**
 
 ```
-traxus.duckdns.org {
+yourserver.example.com {
     reverse_proxy localhost:8765
 }
 ```
@@ -971,7 +971,7 @@ relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
 |-----------|------|---------|
 | VPS (any provider) | VPS | Ubuntu 24.04, x86-64, 1+ vCore / 1+ GB RAM |
 | Ubuntu 24.04 | OS | Python 3.12, systemd |
-| Duck DNS | Dynamic DNS | Free subdomain → VPS public IP |
+| Dynamic DNS (e.g. Duck DNS) | Dynamic DNS | Free subdomain → VPS public IP |
 | Caddy | Reverse proxy | TLS termination, auto Let's Encrypt, WSS→WS |
 | UFW | Firewall | Allow 22, 80, 443; deny 8765 |
 | systemd | Process manager | Auto-start, restart on failure |
@@ -1113,17 +1113,16 @@ certbot. Caddy eliminates all of that.
 **Trade-off:** Additional process to manage. However, Caddy is a single static
 binary with systemd integration, so operational overhead is minimal.
 
-### 9.6. Duck DNS for Domain Names
+### 9.6. Dynamic DNS for Domain Names
 
-**Decision:** Use Duck DNS (free dynamic DNS) instead of purchasing a domain.
+**Decision:** Use a free dynamic DNS service instead of purchasing a domain.
 
 **Why:** Zero cost, instant setup, sufficient for personal/small-team use.
-The subdomain `traxus.duckdns.org` is all that's needed for Let's Encrypt
-to issue a certificate.
+A dynamic DNS subdomain is all that's needed for Let's Encrypt to issue a
+certificate (e.g. Duck DNS, No-IP, or similar providers).
 
-**Trade-off:** Dependency on a free third-party service. Duck DNS could go
-down or discontinue service. For production use, a purchased domain would be
-more reliable.
+**Trade-off:** Dependency on a free third-party service that could go down
+or discontinue. For production use, a purchased domain would be more reliable.
 
 ### 9.7. No Database, No ORM
 

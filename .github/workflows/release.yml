@@ -57,21 +57,56 @@ jobs:
           path: dist/traxus-${{ github.ref_name }}-windows.exe
           if-no-files-found: error
 
-  # ── 3. Publish GitHub Release ─────────────────────────────────────────────
+  # ── 3. Build macOS arm64 binary ───────────────────────────────────────────
+  build-macos-arm64:
+    name: Build macOS binary (arm64)
+    runs-on: macos-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller
+
+      - name: Build executable
+        run: pyinstaller traxus-macos.spec
+
+      - name: Rename artifact with version
+        run: mv dist/traxus "dist/traxus-${{ github.ref_name }}-macos-arm64"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: traxus-macos-arm64
+          path: dist/traxus-${{ github.ref_name }}-macos-arm64
+          if-no-files-found: error
+
+  # ── 4. Publish GitHub Release ─────────────────────────────────────────────
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [test, build-windows]
+    needs: [test, build-windows, build-macos-arm64]
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download build artifact
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
           name: traxus-windows
+          path: dist/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: traxus-macos-arm64
           path: dist/
 
       - name: Build release body
@@ -86,14 +121,28 @@ jobs:
           | Platform | File |
           |----------|------|
           | Windows (64-bit) | `traxus-${{ github.ref_name }}-windows.exe` |
+          | macOS (Apple Silicon) | `traxus-${{ github.ref_name }}-macos-arm64` |
 
           ## Requirements
 
+          **Windows**
           - No Python installation needed — the `.exe` is self-contained.
           - Voice (WebRTC/Opus) is bundled — no extra install required.
           - **Run from Windows Terminal or PowerShell** (not by double-clicking
             from Explorer). See [deploy/windows-build-warnings.md](deploy/windows-build-warnings.md)
             for details.
+
+          **macOS (Apple Silicon)**
+          - No Python installation needed — the binary is self-contained.
+          - Voice (WebRTC/Opus) is bundled — no extra install required.
+          - **Run from Terminal.app or iTerm2.**
+          - macOS Gatekeeper will block the binary on first run. To allow it:
+            ```
+            xattr -rd com.apple.quarantine ./traxus-${{ github.ref_name }}-macos-arm64
+            chmod +x ./traxus-${{ github.ref_name }}-macos-arm64
+            ./traxus-${{ github.ref_name }}-macos-arm64
+            ```
+            Alternatively: right-click → Open in Finder, then click Open.
 
           ## Connecting
 
@@ -104,5 +153,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/traxus-${{ github.ref_name }}-windows.exe
+          files: |
+            dist/traxus-${{ github.ref_name }}-windows.exe
+            dist/traxus-${{ github.ref_name }}-macos-arm64
           body_path: /tmp/release_body.md

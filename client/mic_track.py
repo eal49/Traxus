@@ -31,6 +31,9 @@ _DTYPE      = "int16"
 _QUEUE_MAX  = 20           # drop oldest beyond this to avoid memory growth
 
 
+_FADE_LEN = _BLOCKSIZE  # 20 ms linear ramp — one full frame
+
+
 class MicTrack(AudioStreamTrack):
     """
     Live microphone source for aiortc.
@@ -56,6 +59,7 @@ class MicTrack(AudioStreamTrack):
         self._pts: int = 0
         self._start: float | None = None  # wall-clock origin for pacing
         self._fork_queues: list[asyncio.Queue] = []
+        self._prev_was_real: bool = False
 
         self._stream = self._open_stream(device)
 
@@ -123,8 +127,13 @@ class MicTrack(AudioStreamTrack):
 
         if raw is not None:
             samples = np.frombuffer(raw, dtype=np.int16)
+            if not self._prev_was_real:
+                ramp = np.linspace(0.0, 1.0, _FADE_LEN, dtype=np.float32)
+                samples = (samples.astype(np.float32) * ramp).astype(np.int16)
         else:
             samples = np.zeros(_BLOCKSIZE, dtype=np.int16)
+
+        self._prev_was_real = raw is not None
 
         frame = av.AudioFrame.from_ndarray(
             samples.reshape(1, -1),  # (channels, samples)
@@ -189,6 +198,7 @@ class MicFork(AudioStreamTrack):
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._pts: int = 0
         self._start: float | None = None
+        self._prev_was_real: bool = False
 
     async def recv(self) -> "av.AudioFrame":
         loop = asyncio.get_running_loop()
@@ -206,8 +216,13 @@ class MicFork(AudioStreamTrack):
 
         if raw is not None:
             samples = np.frombuffer(raw, dtype=np.int16)
+            if not self._prev_was_real:
+                ramp = np.linspace(0.0, 1.0, _FADE_LEN, dtype=np.float32)
+                samples = (samples.astype(np.float32) * ramp).astype(np.int16)
         else:
             samples = np.zeros(_BLOCKSIZE, dtype=np.int16)
+
+        self._prev_was_real = raw is not None
 
         frame = av.AudioFrame.from_ndarray(
             samples.reshape(1, -1),
