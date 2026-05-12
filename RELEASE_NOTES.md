@@ -1,3 +1,20 @@
+## What's new in v0.2.9
+
+- **macOS Apple Silicon binary** — a self-contained arm64 executable is now
+  published with every release (`traxus-vX.Y.Z-macos-arm64`). No Python
+  installation required. On first launch, clear Gatekeeper's quarantine flag:
+  `xattr -rd com.apple.quarantine ./traxus-*-macos-arm64 && chmod +x ./traxus-*-macos-arm64`
+  Then run from Terminal.app or iTerm2. Intel Macs are not supported by this
+  binary; use `pip install` from source instead.
+- **PTT fade-in** — the first audio frame after pressing Push-to-Talk now ramps
+  from silence to full amplitude over 20 ms, eliminating the audible pop that
+  occurred when the microphone gate opened mid-sample. Subsequent frames play at
+  full amplitude immediately. The fade is applied to both `MicTrack` (single
+  peer) and `MicFork` (multi-peer fan-out).
+- **AGPL v3 license** — the repository is now licensed under the GNU Affero
+  General Public License v3. Anyone running a modified version of the Traxus
+  server must publish their changes.
+
 ## What's new in v0.2.8
 
 - **Perceptual volume curve** — the per-participant volume slider now uses a

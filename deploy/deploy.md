@@ -28,7 +28,7 @@ Note the **public IP address** of your instance for the next step.
 2. Enter a subdomain name (e.g. `traxus`) and click **Add domain**.
 3. In the **current ip** field, enter your VPS public IP and click **Update IP**.
 
-Your server will be reachable at `wss://traxus.duckdns.org` (substitute your chosen name).
+Your server will be reachable at `wss://yourname.duckdns.org` (substitute your chosen name).
 
 ---
 
@@ -86,10 +86,10 @@ YOUR-NAME.duckdns.org {
 EOF
 ```
 
-The complete file should look like this (example for `traxus.duckdns.org`):
+The complete file should look like this (example for `yourname.duckdns.org`):
 
 ```
-traxus.duckdns.org {
+yourname.duckdns.org {
     reverse_proxy localhost:8765
 }
 ```

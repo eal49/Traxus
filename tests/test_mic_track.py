@@ -80,9 +80,18 @@ class TestMicTrackAudio(unittest.IsolatedAsyncioTestCase):
         pcm = (np.ones(320, dtype=np.int16) * 1000).tobytes()
         await track._queue.put(pcm)
 
+        # First real frame after silence: fade-in ramp applied (first sample ≈ 0, last = 1000).
         frame = await track.recv()
         arr = frame.to_ndarray().flatten()
-        self.assertEqual(arr[0], 1000, "recv() must return the queued PCM samples")
+        self.assertEqual(arr[0], 0, "fade-in: first sample of first real frame must be 0")
+        self.assertEqual(arr[-1], 1000, "fade-in: last sample must reach full amplitude")
+
+        # Second consecutive real frame: no fade, full amplitude throughout.
+        pcm2 = (np.ones(320, dtype=np.int16) * 1000).tobytes()
+        await track._queue.put(pcm2)
+        frame2 = await track.recv()
+        arr2 = frame2.to_ndarray().flatten()
+        self.assertEqual(arr2[0], 1000, "second consecutive real frame must not be faded")
 
     async def test_pts_increments_monotonically(self):
         from client.mic_track import MicTrack
@@ -263,9 +272,11 @@ class TestMicFork(unittest.IsolatedAsyncioTestCase):
             track.stop()
         pcm = (np.ones(320, dtype=np.int16) * 500).tobytes()
         await fork._queue.put(pcm)
+        # First real frame: fade-in ramp (first sample ≈ 0, last = 500).
         frame = await fork.recv()
         arr = frame.to_ndarray().flatten()
-        self.assertEqual(arr[0], 500)
+        self.assertEqual(arr[0], 0, "fade-in: first sample must be 0")
+        self.assertEqual(arr[-1], 500, "fade-in: last sample must reach full amplitude")
 
     async def test_fork_recv_returns_silence_when_empty(self):
         from client.mic_track import MicTrack
