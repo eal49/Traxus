@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import bcrypt
+try:
+    import bcrypt
+except ImportError:  # pragma: no cover
+    bcrypt = None  # type: ignore[assignment]
 
 
 def load(path: str | None) -> dict | None:
@@ -27,6 +30,8 @@ def load(path: str | None) -> dict | None:
 
 def verify(store: dict, username: str, password: str) -> bool:
     """Return True iff username exists in store and password matches its bcrypt hash."""
+    if bcrypt is None:
+        raise ImportError("bcrypt is required for password auth: pip install bcrypt>=4.0")
     stored_hash = store.get(username)
     if stored_hash is None:
         return False
@@ -38,6 +43,8 @@ def verify(store: dict, username: str, password: str) -> bool:
 
 def add_user(path: str, username: str, password: str) -> None:
     """Hash password and write/overwrite the entry for username in the credentials file."""
+    if bcrypt is None:
+        raise ImportError("bcrypt is required for password auth: pip install bcrypt>=4.0")
     hashed = bcrypt.hashpw(
         password.encode("utf-8"), bcrypt.gensalt(rounds=12)
     ).decode("utf-8")
