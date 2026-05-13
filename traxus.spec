@@ -9,6 +9,7 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sounddevice
+import certifi
 
 # ── Locate native DLLs ────────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@ a = Analysis(
         # aiortc and av metadata/type stubs.
         *collect_data_files("aiortc"),
         *collect_data_files("av"),
+        # CA certificate bundle for wss:// TLS verification.
+        (certifi.where(), "certifi"),
     ],
     hiddenimports=[
         # websockets uses lazy submodule imports that PyInstaller misses.

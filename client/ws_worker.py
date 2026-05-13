@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 import time
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,12 @@ import websockets.asyncio.client
 import websockets.exceptions
 
 from shared.message_types import C2S, VERSION
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = ssl.create_default_context()
 
 if TYPE_CHECKING:
     from client.app import TraxusApp
@@ -73,7 +80,8 @@ class WsWorker:
         while self._running:
             try:
                 self._post_state("connecting")
-                async with websockets.asyncio.client.connect(url) as ws:
+                ssl_ctx = _SSL_CONTEXT if url.startswith("wss://") else None
+                async with websockets.asyncio.client.connect(url, ssl=ssl_ctx) as ws:
                     self._ws = ws
                     delay = BACKOFF_INITIAL          # reset back-off on success
 
