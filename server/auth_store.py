@@ -21,7 +21,7 @@ def load(path: str | None) -> dict | None:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
 
 
@@ -46,7 +46,7 @@ def add_user(path: str, username: str, password: str) -> None:
     try:
         with open(p, encoding="utf-8") as f:
             store = json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         store = {}
 
     store[username] = hashed
