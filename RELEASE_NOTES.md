@@ -6,6 +6,10 @@
   gains an optional **Password** field; servers without auth ignore it entirely.
   Credentials are bcrypt-hashed (work factor 12); the file is never readable by
   the client. See `deploy/deploy.md` for the full setup guide.
+- **Fix: macOS and Windows clients now connect via `wss://`** — PyInstaller
+  builds were missing the CA certificate bundle needed for TLS verification.
+  `wss://` connections silently failed; this is now fixed by bundling
+  `certifi`'s CA store into the executable.
 
 ## What's new in v0.2.9
 
