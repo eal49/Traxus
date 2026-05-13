@@ -41,7 +41,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi
 
       - name: Build executable
         run: pyinstaller traxus.spec
@@ -71,7 +71,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi
 
       - name: Build executable
         run: pyinstaller traxus-macos.spec
