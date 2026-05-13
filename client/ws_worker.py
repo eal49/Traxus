@@ -66,7 +66,7 @@ class WsWorker:
 
     # ── Main coroutine (passed to app.run_worker) ─────────────────────────────
 
-    async def run(self, url: str, username: str) -> None:
+    async def run(self, url: str, username: str, password: str = "") -> None:
         self._running = True
         delay = BACKOFF_INITIAL
 
@@ -77,12 +77,15 @@ class WsWorker:
                     self._ws = ws
                     delay = BACKOFF_INITIAL          # reset back-off on success
 
-                    # Send auth immediately
-                    await ws.send(json.dumps({
+                    # Send auth immediately; include password only when provided.
+                    auth_payload: dict = {
                         "type": C2S.AUTH,
                         "username": username,
                         "version": VERSION,
-                    }))
+                    }
+                    if password:
+                        auth_payload["password"] = password
+                    await ws.send(json.dumps(auth_payload))
 
                     self._post_state("connected")
 

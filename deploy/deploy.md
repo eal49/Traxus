@@ -276,6 +276,54 @@ in the server URL field on the login screen.
 
 ---
 
+## Enabling Password Authentication
+
+By default the server runs in no-auth mode — any username connects without a password. To require passwords, create a credentials file and set the `TRAXUS_USERS` env var.
+
+### 1. Create the credentials file
+
+```bash
+# Create an empty file in the Traxus directory (adduser will write to it)
+touch /home/ubuntu/Traxus/users.json
+chmod 600 /home/ubuntu/Traxus/users.json   # only the ubuntu user should read this
+```
+
+### 2. Add user accounts
+
+```bash
+TRAXUS_USERS=/home/ubuntu/Traxus/users.json python -m server.adduser alice
+# Enter and confirm a password when prompted.
+# Repeat for each user.
+```
+
+To update a user's password, run the same command again — the entry is overwritten.
+
+### 3. Set TRAXUS_USERS in the systemd service
+
+Edit `/etc/systemd/system/traxus-server.service` and add the env var under `[Service]`:
+
+```ini
+[Service]
+Environment="TRAXUS_USERS=/home/ubuntu/Traxus/users.json"
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart traxus-server
+sudo journalctl -u traxus-server -f
+# Expect: "Auth enabled: N user(s) loaded from /home/ubuntu/Traxus/users.json"
+```
+
+### 4. Connect with a password
+
+Users open the Traxus client, enter the server URL and their username, then type their password in the **Password** field before clicking Connect. Servers without auth ignore the password field.
+
+> **Rollback:** To return to no-auth mode, remove the `Environment=` line and restart. The credentials file is not deleted.
+
+---
+
 ## Updating the Server
 
 ```bash

@@ -33,6 +33,11 @@ class LoginScreen(Screen):
             id="nick-input",
             max_length=32,
         )
+        yield Input(
+            placeholder="Password (if required by server)",
+            id="password-input",
+            password=True,
+        )
         yield Button("Connect", id="connect-btn", variant="primary")
         yield Label("", id="error-label")
 
@@ -54,15 +59,17 @@ class LoginScreen(Screen):
             self._try_connect()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Allow pressing Enter in either field to advance / connect
         if event.input.id == "server-input":
             self.query_one("#nick-input", Input).focus()
         else:
+            # Enter in nick-input or password-input both trigger connect.
+            # Password is optional; don't force keyboard users through it.
             self._try_connect()
 
     def _try_connect(self) -> None:
-        server_url = self.query_one("#server-input", Input).value.strip()
-        username   = self.query_one("#nick-input",   Input).value.strip()
+        server_url = self.query_one("#server-input",   Input).value.strip()
+        username   = self.query_one("#nick-input",     Input).value.strip()
+        password   = self.query_one("#password-input", Input).value
 
         if not server_url:
             self.show_error("Please enter a server address.")
@@ -77,9 +84,9 @@ class LoginScreen(Screen):
             return
 
         self.show_error("")  # clear any previous error
-        # Delegate to app first — don't block the connection with I/O
-        self.app.connect_to_server(server_url, username)  # type: ignore[attr-defined]
-        # Persist for next session (after connection is already scheduled)
+        # Delegate to app — password is passed but never persisted.
+        self.app.connect_to_server(server_url, username, password)  # type: ignore[attr-defined]
+        # Persist server URL and username only (never password).
         try:
             settings = load_settings()
             settings["last_server"] = server_url

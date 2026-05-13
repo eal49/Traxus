@@ -127,11 +127,11 @@ class TraxusApp(App):
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
 
-    def connect_to_server(self, server_url: str, username: str) -> None:
+    def connect_to_server(self, server_url: str, username: str, password: str = "") -> None:
         self.username = username
         self._ws_worker = WsWorker(self)
         self.run_worker(
-            self._ws_worker.run(server_url, username),
+            self._ws_worker.run(server_url, username, password),
             exclusive=True,
             name="ws_connection",
         )
@@ -565,13 +565,18 @@ class TraxusApp(App):
 
             case "auth_error":
                 reason = payload.get("reason", "unknown")
-                login = self.query_one(LoginScreen)
                 reason_text = {
                     "username_taken":   "That username is already taken.",
                     "invalid_username": "Invalid username. Use 1–32 non-space chars.",
                     "version_mismatch": f"Client version mismatch. Server requires v{payload.get('server_version', '?')}. Please update your client.",
+                    "wrong_password":   "Incorrect password.",
                 }.get(reason, f"Auth failed: {reason}")
-                login.show_error(reason_text)
+                try:
+                    screen = self.screen
+                    if isinstance(screen, LoginScreen):
+                        screen.show_error(reason_text)
+                except Exception:
+                    pass
 
             case "channel_list":
                 if chat:

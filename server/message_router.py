@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
+from server import auth_store as _auth_store_mod
 
 if TYPE_CHECKING:
     from server.connection_manager import ConnectedClient, ConnectionManager
@@ -26,9 +27,11 @@ class MessageRouter:
         self,
         conn_mgr: "ConnectionManager",
         chan_reg: "ChannelRegistry",
+        auth_store: "dict | None" = None,
     ) -> None:
         self._conn = conn_mgr
         self._chan = chan_reg
+        self._auth_store = auth_store
         self._handlers = {
             C2S.AUTH:          self._handle_auth,
             C2S.JOIN:          self._handle_join,
@@ -119,6 +122,16 @@ class MessageRouter:
                 "type": S2C.AUTH_ERROR, "reason": AuthError.USERNAME_TAKEN,
             })
             return client
+
+        # Password verification — only active when credentials file is loaded.
+        if self._auth_store is not None:
+            password = str(payload.get("password", ""))
+            if not _auth_store_mod.verify(self._auth_store, username, password):
+                await self._send(ws, {
+                    "type": S2C.AUTH_ERROR, "reason": AuthError.WRONG_PASSWORD,
+                })
+                await ws.close()
+                return client
 
         client = self._conn.register(ws, username)
         log.info("AUTH  user=%s id=%s", username, client.user_id)

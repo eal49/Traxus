@@ -55,6 +55,7 @@ class AuthError:
     USERNAME_TAKEN   = "username_taken"
     INVALID_USERNAME = "invalid_username"
     VERSION_MISMATCH = "version_mismatch"
+    WRONG_PASSWORD   = "wrong_password"
 
 
 # ── Server error codes ────────────────────────────────────────────────────────

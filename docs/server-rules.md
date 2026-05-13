@@ -18,6 +18,16 @@ If the server receives any other message type from a WebSocket connection that h
 
 The connection is kept open; the client may still send a valid `auth` message.
 
+### Password Verification (auth mode)
+
+When `TRAXUS_USERS` is set to a valid credentials file path, the server additionally verifies the `password` field of every `auth` message using bcrypt:
+
+- **Correct password** → auth proceeds normally.
+- **Wrong or missing password** → `auth_error { reason: "wrong_password" }` and connection close.
+- **Unknown username** → also returns `wrong_password` (no enumeration).
+
+When `TRAXUS_USERS` is unset or the file is absent, password verification is skipped entirely (no-auth mode — existing behaviour preserved).
+
 ---
 
 ## Username Validation (on `auth`)

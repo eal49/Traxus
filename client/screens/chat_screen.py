@@ -104,10 +104,13 @@ class ChatScreen(Screen):
         sidebar.refresh_channels(channels)
 
     def set_active_channel(self, channel: str) -> None:
-        sidebar = self.query_one("#sidebar", ChannelSidebar)
-        sidebar.set_active(channel)
-        input_bar = self.query_one("#input-area", InputBar)
-        input_bar.set_channel(channel)
+        try:
+            sidebar = self.query_one("#sidebar", ChannelSidebar)
+            sidebar.set_active(channel)
+            input_bar = self.query_one("#input-area", InputBar)
+            input_bar.set_channel(channel)
+        except Exception:
+            pass
 
     def update_status(self, state: str, latency: int = 0, nick: str = "") -> None:
         self.query_one("#status-bar", StatusBar).set_state(state, latency, nick)
@@ -160,7 +163,10 @@ class ChatScreen(Screen):
         self.app.toggle_ptt()  # type: ignore[attr-defined]
 
     def load_history(self, history: list[dict]) -> None:
-        mv = self.query_one("#messages", MessageView)
+        try:
+            mv = self.query_one("#messages", MessageView)
+        except Exception:
+            return
         mv.clear()
         mv._lines = []
         mv._payloads = []

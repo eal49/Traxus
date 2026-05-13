@@ -76,6 +76,8 @@ Client                                    Server
 
 > **Auth guard:** The server rejects every message type except `auth` from an unauthenticated connection with `error { code: "not_authenticated" }`.
 
+> **Password auth:** When the server is configured with `TRAXUS_USERS`, the `auth` message must include a `password` field matching the stored bcrypt hash. A missing or incorrect password returns `auth_error { reason: "wrong_password" }` and closes the connection. When `TRAXUS_USERS` is unset, the `password` field is silently ignored.
+
 ---
 
 ## Client → Server Messages (C2S)
@@ -96,7 +98,8 @@ First message sent after connecting. Must precede all other messages.
 |---|---|---|---|
 | `type` | string | Yes | `"auth"` |
 | `username` | string | Yes | Desired display name. 1–32 chars, no spaces, must be unique. |
-| `client_version` | string | No | Client version string (currently unused by server). |
+| `version` | string | Yes | Client version string. Must match server version or auth is rejected with `version_mismatch`. |
+| `password` | string | No | Password for the account. Required only when the server has `TRAXUS_USERS` configured; omit or leave empty for no-auth servers. |
 
 ---
 
@@ -340,7 +343,16 @@ Authentication rejected.
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | `"auth_error"` |
-| `reason` | string | `"username_taken"` or `"invalid_username"` |
+| `reason` | string | See table below. |
+
+**Reason values:**
+
+| Reason | Meaning |
+|---|---|
+| `username_taken` | Another connected client already uses this username. Connection stays open; client may retry with a different name. |
+| `invalid_username` | Username is empty, over 32 chars, or contains spaces. |
+| `version_mismatch` | Client version does not match server version. Connection is closed. |
+| `wrong_password` | Password missing or incorrect; also returned for unknown usernames to prevent enumeration. Connection is closed. |
 
 ---
 

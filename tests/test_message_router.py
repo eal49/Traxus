@@ -856,5 +856,116 @@ class TestPinMessage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(joined["pin"]["msg_id"], msg_id)
 
 
+# ── Auth-store integration tests ─────────────────────────────────────────────
+
+try:
+    import bcrypt as _bcrypt
+    _BCRYPT_AVAILABLE = True
+except ImportError:
+    _BCRYPT_AVAILABLE = False
+
+
+def _make_router_with_store(store):
+    """Return a MessageRouter wired to a fake credential store."""
+    conn = ConnectionManager()
+    chan  = ChannelRegistry()
+    return MessageRouter(conn, chan, auth_store=store), conn, chan
+
+
+def _make_store(username, password):
+    import bcrypt
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return {username: hashed}
+
+
+@unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
+class TestAuthWithCredentials(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        self.store = _make_store("alice", "correct")
+        self.router, self.conn, self.chan = _make_router_with_store(self.store)
+        self.ws = MockWs()
+
+    async def test_correct_password_accepted(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice",
+                "password": "correct", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNotNone(client)
+        self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_OK))
+
+    async def test_wrong_password_rejected(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice",
+                "password": "wrong", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNone(client)
+        msg = self.ws.first_of_type(S2C.AUTH_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], AuthError.WRONG_PASSWORD)
+        self.assertTrue(self.ws.closed)
+
+    async def test_missing_password_rejected(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNone(client)
+        msg = self.ws.first_of_type(S2C.AUTH_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], AuthError.WRONG_PASSWORD)
+
+    async def test_unknown_username_rejected_with_wrong_password(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "nobody",
+                "password": "correct", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNone(client)
+        msg = self.ws.first_of_type(S2C.AUTH_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], AuthError.WRONG_PASSWORD)
+
+
+@unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
+class TestAuthNoAuthMode(unittest.IsolatedAsyncioTestCase):
+    """No-auth mode: auth_store=None — password field ignored entirely."""
+
+    def setUp(self):
+        self.router, self.conn, self.chan = make_router()  # auth_store=None
+        self.ws = MockWs()
+
+    async def test_no_auth_mode_accepts_without_password(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNotNone(client)
+        self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_OK))
+
+    async def test_no_auth_mode_ignores_password_field(self):
+        client = await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice",
+                "password": "anything", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        self.assertIsNotNone(client)
+        self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_OK))
+
+
 if __name__ == "__main__":
     unittest.main()

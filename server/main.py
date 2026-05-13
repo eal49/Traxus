@@ -22,6 +22,7 @@ import websockets.asyncio.server
 from server.connection_manager import ConnectionManager
 from server.channel_registry import ChannelRegistry
 from server.message_router import MessageRouter
+from server import auth_store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,9 +31,19 @@ logging.basicConfig(
 )
 log = logging.getLogger("traxus.server")
 
+# Load credential store (None = no-auth mode).
+_users_path = os.getenv("TRAXUS_USERS")
+_credential_store = None
+if _users_path:
+    _credential_store = auth_store.load(_users_path)
+    if _credential_store is None:
+        log.warning("TRAXUS_USERS=%r — file not found; starting in no-auth mode", _users_path)
+    else:
+        log.info("Auth enabled: %d user(s) loaded from %s", len(_credential_store), _users_path)
+
 conn_mgr = ConnectionManager()
 chan_reg  = ChannelRegistry()
-router   = MessageRouter(conn_mgr, chan_reg)
+router   = MessageRouter(conn_mgr, chan_reg, _credential_store)
 
 
 async def client_handler(ws: websockets.asyncio.server.ServerConnection) -> None:
