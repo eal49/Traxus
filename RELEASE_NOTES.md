@@ -1,3 +1,12 @@
+## What's new in v0.3.0
+
+- **Password authentication** — servers can now require a password to connect.
+  Set `TRAXUS_USERS=/home/ubuntu/Traxus/users.json` in the systemd service and
+  create accounts with `python -m server.adduser <username>`. The login screen
+  gains an optional **Password** field; servers without auth ignore it entirely.
+  Credentials are bcrypt-hashed (work factor 12); the file is never readable by
+  the client. See `deploy/deploy.md` for the full setup guide.
+
 ## What's new in v0.2.9
 
 - **macOS Apple Silicon binary** — a self-contained arm64 executable is now
