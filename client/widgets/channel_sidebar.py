@@ -46,6 +46,10 @@ class ChannelSidebar(Widget):
             name = ch["name"]
             item = ListItem(Label(f"  ♪ {name}", markup=True), name=name)
             lv.append(item)
+            for member in ch.get("voice_members", []):
+                nested = ListItem(Label(f"    · {member}", markup=True))
+                nested.can_focus = False
+                lv.append(nested)
 
         # Re-apply active highlight after refresh
         if self.active_channel:

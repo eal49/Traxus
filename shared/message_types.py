@@ -50,6 +50,8 @@ class S2C:
     PIN_ADDED            = "pin_added"
     PASSWORD_CHANGED     = "password_changed"
     PASSWORD_CHANGE_ERROR = "password_change_error"
+    USER_ONLINE          = "user_online"
+    USER_OFFLINE         = "user_offline"
 
 
 # ── Auth error reasons ────────────────────────────────────────────────────────

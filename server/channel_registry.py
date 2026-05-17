@@ -80,13 +80,16 @@ class ChannelRegistry:
 
     # ── Serialisation ─────────────────────────────────────────────────────────
 
-    def channel_summary(self, ch: Channel, member_count: int) -> dict:
-        return {
+    def channel_summary(self, ch: Channel, member_count: int, voice_members: list[str] | None = None) -> dict:
+        d: dict = {
             "name": ch.name,
             "topic": ch.topic,
             "member_count": member_count,
             "type": ch.type,
         }
+        if ch.type == "voice":
+            d["voice_members"] = voice_members if voice_members is not None else []
+        return d
 
     @staticmethod
     def is_valid_name(name: str) -> bool:

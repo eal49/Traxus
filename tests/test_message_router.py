@@ -1117,5 +1117,168 @@ class TestChangePassword(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msg["reason"], PasswordChangeError.AUTH_DISABLED)
 
 
+# ── Task 4.3: auth_ok online_users / known_users ──────────────────────────────
+
+class TestAuthOkPresenceFields(unittest.IsolatedAsyncioTestCase):
+
+    async def test_auth_ok_contains_online_users(self):
+        router, conn, _ = make_router()
+        ws = MockWs()
+        await do_auth(router, conn, ws)
+        msg = ws.first_of_type(S2C.AUTH_OK)
+        self.assertIn("online_users", msg)
+        self.assertIsInstance(msg["online_users"], list)
+
+    async def test_auth_ok_online_users_includes_self(self):
+        router, conn, _ = make_router()
+        ws = MockWs()
+        await do_auth(router, conn, ws, username="alice")
+        msg = ws.first_of_type(S2C.AUTH_OK)
+        self.assertIn("alice", msg["online_users"])
+
+    async def test_auth_ok_online_users_includes_existing_peer(self):
+        router, conn, _ = make_router()
+        ws_alice = MockWs()
+        await do_auth(router, conn, ws_alice, username="alice")
+        ws_bob = MockWs()
+        await do_auth(router, conn, ws_bob, username="bob")
+        msg = ws_bob.first_of_type(S2C.AUTH_OK)
+        self.assertIn("alice", msg["online_users"])
+        self.assertIn("bob", msg["online_users"])
+
+    async def test_auth_ok_contains_known_users(self):
+        router, conn, _ = make_router()
+        ws = MockWs()
+        await do_auth(router, conn, ws)
+        msg = ws.first_of_type(S2C.AUTH_OK)
+        self.assertIn("known_users", msg)
+        self.assertIsInstance(msg["known_users"], list)
+
+    async def test_auth_ok_known_users_equals_online_when_no_auth_store(self):
+        router, conn, _ = make_router()
+        ws = MockWs()
+        await do_auth(router, conn, ws, username="alice")
+        msg = ws.first_of_type(S2C.AUTH_OK)
+        self.assertEqual(sorted(msg["online_users"]), sorted(msg["known_users"]))
+
+
+# ── Task 4.1: user_online / user_offline broadcasts ───────────────────────────
+
+class TestUserOnlineOfflineBroadcasts(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.ws_alice = MockWs()
+        self.alice = await do_auth(self.router, self.conn, self.ws_alice, username="alice")
+        self.ws_alice.clear()
+
+    async def test_user_online_sent_to_existing_peers_on_new_auth(self):
+        ws_bob = MockWs()
+        await do_auth(self.router, self.conn, ws_bob, username="bob")
+        msgs = self.ws_alice.of_type(S2C.USER_ONLINE)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["username"], "bob")
+
+    async def test_user_online_not_sent_to_authenticating_user_themselves(self):
+        ws_bob = MockWs()
+        await do_auth(self.router, self.conn, ws_bob, username="bob")
+        self.assertEqual(ws_bob.of_type(S2C.USER_ONLINE), [])
+
+    async def test_user_offline_sent_to_remaining_on_disconnect(self):
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        self.ws_alice.clear()
+        await self.router.on_disconnect(bob)
+        msgs = self.ws_alice.of_type(S2C.USER_OFFLINE)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["username"], "bob")
+
+    async def test_user_offline_contains_correct_username(self):
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        self.ws_alice.clear()
+        await self.router.on_disconnect(bob)
+        msg = self.ws_alice.of_type(S2C.USER_OFFLINE)[0]
+        self.assertEqual(msg["username"], "bob")
+
+
+# ── Task 4.2: voice_members in channel_list ───────────────────────────────────
+
+class TestChannelListVoiceMembers(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = make_router()
+        self.chan.vcreate("lounge", "Voice lounge", "system")
+        self.ws_alice = MockWs()
+        self.alice = await do_auth(self.router, self.conn, self.ws_alice, username="alice")
+        self.ws_alice.clear()
+
+    async def test_channel_list_voice_channel_has_voice_members_key(self):
+        cl = self.ws_alice.first_of_type(S2C.CHANNEL_LIST)
+        if cl is None:
+            await router_dispatch(self.router, self.ws_alice, self.alice,
+                                  {"type": C2S.LIST_CHANNELS})
+            cl = self.ws_alice.first_of_type(S2C.CHANNEL_LIST)
+        voice_entries = [c for c in cl["channels"] if c["type"] == "voice"]
+        self.assertTrue(len(voice_entries) > 0)
+        for entry in voice_entries:
+            self.assertIn("voice_members", entry)
+
+    async def test_text_channel_has_no_voice_members_key(self):
+        await router_dispatch(self.router, self.ws_alice, self.alice,
+                              {"type": C2S.LIST_CHANNELS})
+        cl = self.ws_alice.of_type(S2C.CHANNEL_LIST)[-1]
+        text_entries = [c for c in cl["channels"] if c["type"] == "text"]
+        for entry in text_entries:
+            self.assertNotIn("voice_members", entry)
+
+    async def test_voice_join_rebroadcasts_channel_list_to_all(self):
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        ws_bob.clear()
+        self.ws_alice.clear()
+
+        await router_dispatch(self.router, self.ws_alice, self.alice,
+                              {"type": C2S.VOICE_JOIN, "channel": "lounge"})
+
+        bob_cl = ws_bob.of_type(S2C.CHANNEL_LIST)
+        self.assertGreater(len(bob_cl), 0, "bob should receive channel_list rebroadcast")
+
+    async def test_voice_join_populates_voice_members_in_channel_list(self):
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        ws_bob.clear()
+
+        await router_dispatch(self.router, self.ws_alice, self.alice,
+                              {"type": C2S.VOICE_JOIN, "channel": "lounge"})
+        cl = ws_bob.of_type(S2C.CHANNEL_LIST)[-1]
+        lounge = next(c for c in cl["channels"] if c["name"] == "lounge")
+        self.assertIn("alice", lounge["voice_members"])
+
+    async def test_voice_leave_updates_voice_members_in_channel_list(self):
+        self.alice.voice_channels.add("lounge")
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        ws_bob.clear()
+
+        await router_dispatch(self.router, self.ws_alice, self.alice,
+                              {"type": C2S.VOICE_LEAVE, "channel": "lounge"})
+        cl = ws_bob.of_type(S2C.CHANNEL_LIST)[-1]
+        lounge = next(c for c in cl["channels"] if c["name"] == "lounge")
+        self.assertNotIn("alice", lounge["voice_members"])
+
+    async def test_disconnect_while_in_voice_rebroadcasts_channel_list(self):
+        self.alice.voice_channels.add("lounge")
+        ws_bob = MockWs()
+        bob = await do_auth(self.router, self.conn, ws_bob, username="bob")
+        ws_bob.clear()
+
+        await self.router.on_disconnect(self.alice)
+        bob_cl = ws_bob.of_type(S2C.CHANNEL_LIST)
+        self.assertGreater(len(bob_cl), 0)
+        lounge = next(c for c in bob_cl[-1]["channels"] if c["name"] == "lounge")
+        self.assertNotIn("alice", lounge.get("voice_members", []))
+
+
 if __name__ == "__main__":
     unittest.main()

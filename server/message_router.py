@@ -97,8 +97,15 @@ class MessageRouter:
         summaries = []
         for ch in self._chan.all_channels():
             member_count = len(self._conn.clients_in_channel(ch.name))
-            summaries.append(self._chan.channel_summary(ch, member_count))
+            voice_members = (
+                [c.username for c in self._conn.voice_clients_in_channel(ch.name)]
+                if ch.type == "voice" else None
+            )
+            summaries.append(self._chan.channel_summary(ch, member_count, voice_members))
         return {"type": S2C.CHANNEL_LIST, "channels": summaries}
+
+    async def _broadcast_channel_list(self) -> None:
+        await self._conn.broadcast_to_all(self._channel_list_payload())
 
     # ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -139,15 +146,30 @@ class MessageRouter:
         client = self._conn.register(ws, username)
         log.info("AUTH  user=%s id=%s", username, client.user_id)
 
+        online_users = [c.username for c in self._conn.all_clients()]
+        known_users = (
+            list(self._auth_store.keys())
+            if self._auth_store is not None
+            else online_users
+        )
+
         auth_ok: dict = {
             "type": S2C.AUTH_OK,
             "user_id": client.user_id,
             "username": username,
             "server_version": VERSION,
+            "online_users": online_users,
+            "known_users": known_users,
         }
         if self._auth_store is not None and _auth_store_mod.get_must_change(self._auth_store, username):
             auth_ok["must_change_password"] = True
         await self._send(ws, auth_ok)
+
+        # Notify all other connected clients that this user is now online
+        await self._conn.broadcast_to_all(
+            {"type": S2C.USER_ONLINE, "username": username},
+            exclude_id=client.user_id,
+        )
 
         # Auto-join #general
         await self._do_join(client, ws, "general")
@@ -377,6 +399,7 @@ class MessageRouter:
         voice_state = {"type": S2C.VOICE_STATE, "channel": channel, "users": members}
         for vc in self._conn.voice_clients_in_channel(channel):
             await self._conn.send_to(vc.user_id, voice_state)
+        await self._broadcast_channel_list()
         log.info("VJOIN user=%s channel=#%s", client.username, channel)
         return client
 
@@ -394,6 +417,7 @@ class MessageRouter:
         await self._conn.send_to(client.user_id, {
             "type": S2C.VOICE_STATE, "channel": channel, "users": []
         })
+        await self._broadcast_channel_list()
         log.info("VLEAVE user=%s channel=#%s", client.username, channel)
         return client
 
@@ -480,14 +504,20 @@ class MessageRouter:
             return
         channels = list(client.channels)
         voice_channels = list(client.voice_channels)
+        username = client.username
         self._conn.unregister(client.user_id)
-        log.info("QUIT  user=%s", client.username)
+        log.info("QUIT  user=%s", username)
+
+        # Notify remaining clients that this user went offline
+        await self._conn.broadcast_to_all(
+            {"type": S2C.USER_OFFLINE, "username": username}
+        )
 
         for channel in channels:
             await self._conn.broadcast_to_channel(channel, {
                 "type": S2C.SYSTEM,
                 "channel": channel,
-                "content": f"{client.username} disconnected",
+                "content": f"{username} disconnected",
                 "ts": time.time(),
             })
             # Broadcast updated member list to remaining channel members
@@ -511,7 +541,4 @@ class MessageRouter:
                 await self._conn.send_to(vc.user_id, voice_state)
 
         # Refresh channel list for everyone
-        await self._conn.broadcast_to_all(self._build_channel_list())
-
-    def _build_channel_list(self) -> dict:
-        return self._channel_list_payload()
+        await self._broadcast_channel_list()

@@ -5,13 +5,11 @@ from textual.widget import Widget
 
 _MIN_WIDTH = 22
 _MAX_WIDTH = 40
-# Display columns consumed by the non-nick parts of a voice row:
-#   " " cursor " " "🔊"(2) " " + "  " bar(15) = 1+1+1+2+1+2+15 = 23
-_VOICE_OVERHEAD = 23
-_MEMBER_INDENT = 2  # leading spaces before member name
-# border-left: tall in CSS consumes 1 column from the content area;
-# add this to the computed content width when setting styles.width.
+_MEMBER_INDENT = 2
 _BORDER_OVERHEAD = 1
+# Columns consumed by " ▶ 🔊 " prefix and "  100%" suffix in a voice row:
+#   cursor(1) + space(1) + emoji(2) + space(1) + percent_max(5) = 10 overhead
+_VOICE_OVERHEAD = 10
 
 
 def _clip_nick(name: str, max_len: int) -> str:
@@ -20,14 +18,21 @@ def _clip_nick(name: str, max_len: int) -> str:
     return (name[:max_len - 3] + "...") if max_len > 3 else name[:max_len]
 
 
+def _volume_icon(level: int) -> str:
+    if level == 0:
+        return "🔇"
+    if level <= 50:
+        return "🔈"
+    if level <= 149:
+        return "🔉"
+    return "🔊"
+
+
 class MemberPanel(Widget):
-    """Right-side panel showing channel members and in-voice participants.
+    """Right-side panel showing server-wide Online / Offline member sections.
 
-    When focused, ↑/↓ navigate among voice users and ←/→ adjust their
-    playback volume in 10% steps (0–200%, default 100%).
-
-    Width adapts to the longest nickname (clamped to _MIN_WIDTH–_MAX_WIDTH).
-    Nicknames that would overflow the max width are clipped with "…".
+    Online users who are in a voice channel display an inline volume icon and
+    percentage.  ↑/↓ navigate among voice users; ←/→ adjust their volume.
     """
 
     DEFAULT_CSS = ""
@@ -35,7 +40,8 @@ class MemberPanel(Widget):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._members: list[dict] = []
+        self._online: list[str] = []
+        self._offline: list[str] = []
         self._sorted_voice_users: list[str] = []
         self._cursor: int = 0
         self._panel_width: int = _MIN_WIDTH
@@ -44,7 +50,6 @@ class MemberPanel(Widget):
 
     @property
     def _volume_source(self):
-        """Return PeerManager if in a voice channel, else None."""
         try:
             return getattr(self.app, "_peer_manager", None)
         except Exception:
@@ -54,9 +59,8 @@ class MemberPanel(Widget):
 
     def _recompute_width(self) -> None:
         needed = _MIN_WIDTH
-        for m in self._members:
-            nick = m.get("username", "")
-            needed = max(needed, len(nick) + _MEMBER_INDENT)
+        for name in self._online + self._offline:
+            needed = max(needed, len(name) + _MEMBER_INDENT)
         for name in self._sorted_voice_users:
             needed = max(needed, len(name) + _VOICE_OVERHEAD)
         self._panel_width = min(_MAX_WIDTH, needed)
@@ -64,30 +68,35 @@ class MemberPanel(Widget):
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
-    def _volume_bar(self, username: str) -> str:
-        engine = self._volume_source
-        level = engine.get_volume(username) if engine is not None else 100
-        filled = round(level / 20)          # 0%→0, 100%→5, 200%→10
-        bar = "█" * filled + "░" * (10 - filled)
-        return f"{bar} {level:3d}%"
-
     def _build_markup(self) -> str:
         max_voice_nick = max(1, self._panel_width - _VOICE_OVERHEAD)
         max_member_nick = max(1, self._panel_width - _MEMBER_INDENT)
 
-        lines = [r"[bold dim]  Members[/bold dim]"]
-        for m in self._members:
-            name = _clip_nick(m.get("username", "?"), max_member_nick)
-            lines.append(f"  {name}")
-
-        if self._sorted_voice_users:
-            lines.append("")
-            lines.append(r"[bold dim]  In Voice[/bold dim]")
-            for i, name in enumerate(self._sorted_voice_users):
+        lines = [
+            rf"[bold dim]  ONLINE — {len(self._online)}[/bold dim]"
+        ]
+        voice_set = set(self._sorted_voice_users)
+        for name in self._online:
+            if name in voice_set:
+                idx = self._sorted_voice_users.index(name)
+                cursor = "▶" if (idx == self._cursor and self.has_focus) else " "
+                engine = self._volume_source
+                level = engine.get_volume(name) if engine is not None else 100
+                icon = _volume_icon(level)
                 display = _clip_nick(name, max_voice_nick)
-                cursor = "▶" if (i == self._cursor and self.has_focus) else " "
-                bar = self._volume_bar(name)
-                lines.append(f" {cursor} 🔊 {display}  {bar}")
+                lines.append(f" {cursor} {icon} {display}  {level}%")
+            else:
+                display = _clip_nick(name, max_member_nick)
+                lines.append(f"  {display}")
+
+        if self._offline:
+            lines.append("")
+            lines.append(
+                rf"[bold dim]  OFFLINE — {len(self._offline)}[/bold dim]"
+            )
+            for name in self._offline:
+                display = _clip_nick(name, max_member_nick)
+                lines.append(f"  [dim]{display}[/dim]")
 
         return "\n".join(lines)
 
@@ -95,18 +104,23 @@ class MemberPanel(Widget):
         from rich.text import Text
         return Text.from_markup(self._build_markup())
 
-    # ── Public API (unchanged surface, extended) ───────────────────────────────
+    # ── Public API ─────────────────────────────────────────────────────────────
 
-    def set_members(self, members: list[dict]) -> None:
-        self._members = list(members)
+    def set_server_members(self, online: list[str], offline: list[str]) -> None:
+        self._online = list(online)
+        self._offline = list(offline)
         self._recompute_width()
         self.refresh()
+
+    def set_members(self, members: list[dict]) -> None:
+        """Legacy shim: channel-scoped user_list → ignored (no-op)."""
+        pass
 
     def update_voice(self, voice_users: list[dict]) -> None:
         self._sorted_voice_users = sorted(
             u.get("username", "") for u in voice_users if u.get("username")
         )
-        self._cursor = 0
+        self._cursor = min(self._cursor, max(0, len(self._sorted_voice_users) - 1))
         self._recompute_width()
         self.refresh()
 

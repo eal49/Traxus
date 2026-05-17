@@ -349,9 +349,11 @@ Authentication accepted.
 | `user_id` | string | UUID4 assigned to this connection. |
 | `username` | string | Confirmed display name (matches the `auth` request). |
 | `server_version` | string | Server version string. |
+| `online_users` | array of strings | Usernames of all clients currently connected at the moment of authentication (includes the authenticating user). |
+| `known_users` | array of strings | All registered usernames from the server's user store. When the server has no `TRAXUS_USERS` configured, equals `online_users`. |
 | `must_change_password` | boolean | Present and `true` only when the server admin provisioned the account with a temporary password. The client should prompt the user to run `/passwd`. |
 
-Immediately followed by `joined` (for `#general`) and `channel_list`.
+Immediately followed by `joined` (for `#general`) and `channel_list`. The server also broadcasts `user_online` to all previously connected clients at this point.
 
 ---
 
@@ -430,8 +432,9 @@ Directory of all channels on the server.
 {
   "type": "channel_list",
   "channels": [
-    { "name": "general", "topic": "General chat", "member_count": 3 },
-    { "name": "random",  "topic": "Anything goes", "member_count": 1 }
+    { "name": "general", "topic": "General chat", "member_count": 3, "type": "text" },
+    { "name": "lounge",  "topic": "Voice lounge", "member_count": 0, "type": "voice",
+      "voice_members": ["alice", "bob"] }
   ]
 }
 ```
@@ -442,9 +445,11 @@ Directory of all channels on the server.
 | `channels` | array | Array of channel summary objects. |
 | `channels[].name` | string | Channel name. |
 | `channels[].topic` | string | Channel topic (may be empty). |
-| `channels[].member_count` | integer | Number of currently connected members. |
+| `channels[].member_count` | integer | Number of currently connected text-channel members. |
+| `channels[].type` | string | `"text"` or `"voice"`. |
+| `channels[].voice_members` | array of strings | **Voice channels only.** Usernames of all clients currently in the voice channel. Absent for text channels. |
 
-Sent to: the requesting client on `auth` and `list_channels`; **broadcast to all clients** on `create` and on disconnect.
+Sent to: the requesting client on `auth` and `list_channels`; **broadcast to all clients** on `create`, on disconnect, and whenever voice membership changes (`voice_join`, `voice_leave`, or disconnect while in a voice channel).
 
 ---
 
@@ -757,6 +762,40 @@ A WebRTC ICE candidate relayed from another peer.
 | `candidate` | string | ICE candidate string. |
 | `sdp_mid` | string | Media stream identification tag. |
 | `sdp_mline_index` | integer | Index of the associated m-line in the SDP. |
+
+---
+
+### user_online
+
+Broadcast to all currently connected clients (except the new user themselves) when a client authenticates successfully.
+
+```json
+{ "type": "user_online", "username": "bob" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"user_online"` |
+| `username` | string | Display name of the newly connected user. |
+
+Sent to: **all connected clients except the authenticating user**. Clients use this to move the user from the Offline section to the Online section of the member panel.
+
+---
+
+### user_offline
+
+Broadcast to all remaining connected clients when a client disconnects (clean close or network failure).
+
+```json
+{ "type": "user_offline", "username": "bob" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"user_offline"` |
+| `username` | string | Display name of the disconnected user. |
+
+Sent to: **all remaining connected clients**. Triggered on both clean WebSocket close and abnormal disconnection. Clients use this to move the user from the Online section to the Offline section (if the user is a registered user known from `auth_ok`'s `known_users` list).
 
 ---
 

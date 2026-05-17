@@ -106,6 +106,8 @@ class TraxusApp(App):
         self._audio_test_running: bool = False
         self._channel_members: dict[str, list[dict]] = {}
         self._voice_users: list[dict] = []
+        self._online_users: set[str] = set()
+        self._known_offline_users: set[str] = set()
         self._selection_command: str | None = None
         self._peer_manager = None  # PeerManager | None, created on vjoin
         self._server_has_auth: bool = False
@@ -594,6 +596,9 @@ class TraxusApp(App):
                 if payload.get("must_change_password"):
                     self._must_change_password = True
                     self._server_has_auth = True
+                self._online_users = set(payload.get("online_users", []))
+                known = set(payload.get("known_users", list(self._online_users)))
+                self._known_offline_users = known - self._online_users
                 if self._ws_worker:
                     self._ws_worker.notify_auth_ok()
                 # Switch to chat screen
@@ -664,6 +669,30 @@ class TraxusApp(App):
                 if changed and chat:
                     members = self._channel_members.get(self.current_channel, [])
                     chat.update_members(members)
+                # Update presence sets
+                if old in self._online_users:
+                    self._online_users.discard(old)
+                    self._online_users.add(new)
+                if old in self._known_offline_users:
+                    self._known_offline_users.discard(old)
+                    self._known_offline_users.add(new)
+                self._refresh_server_members(chat)
+
+            case S2C.USER_ONLINE:
+                username = payload.get("username", "")
+                if username:
+                    self._online_users.add(username)
+                    self._known_offline_users.discard(username)
+                    self._refresh_server_members(chat)
+
+            case S2C.USER_OFFLINE:
+                username = payload.get("username", "")
+                if username:
+                    was_known = username in self._online_users or username in self._known_offline_users
+                    self._online_users.discard(username)
+                    if was_known:
+                        self._known_offline_users.add(username)
+                    self._refresh_server_members(chat)
 
             case "channel_created":
                 ch  = payload.get("channel", "")
@@ -1010,6 +1039,14 @@ class TraxusApp(App):
         except Exception:
             pass
         return None
+
+    def _refresh_server_members(self, chat: "ChatScreen | None") -> None:
+        """Push updated online/offline lists to ChatScreen."""
+        if chat:
+            chat.update_server_members(
+                sorted(self._online_users),
+                sorted(self._known_offline_users),
+            )
 
     def _update_members_from_system(self, content: str, chat: "ChatScreen | None") -> None:
         import re

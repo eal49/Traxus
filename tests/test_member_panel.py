@@ -1,4 +1,4 @@
-"""Tests for MemberPanel widget and /who command integration."""
+"""Tests for MemberPanel widget — server-roster layout and volume icons."""
 import sys
 import os
 import unittest
@@ -7,7 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from client.app import TraxusApp
 from client.screens.chat_screen import ChatScreen
-from client.widgets.member_panel import MemberPanel, _clip_nick, _MIN_WIDTH, _MAX_WIDTH, _VOICE_OVERHEAD
+from client.widgets.member_panel import (
+    MemberPanel, _clip_nick, _volume_icon,
+    _MIN_WIDTH, _MAX_WIDTH, _VOICE_OVERHEAD,
+)
 from client.widgets.message_view import MessageView
 
 
@@ -43,101 +46,143 @@ class TestClipNick(unittest.TestCase):
     def test_panel_width_clamps_to_max(self):
         mp = MemberPanel()
         long_nick = "a" * 32
-        mp._members = [{"username": long_nick}]
+        mp._online = [long_nick]
+        mp._offline = []
         mp._sorted_voice_users = [long_nick]
         mp._recompute_width()
         self.assertEqual(mp._panel_width, _MAX_WIDTH)
 
     def test_panel_width_clamps_to_min(self):
         mp = MemberPanel()
-        mp._members = []
+        mp._online = []
+        mp._offline = []
         mp._sorted_voice_users = []
         mp._recompute_width()
         self.assertEqual(mp._panel_width, _MIN_WIDTH)
 
-    def test_panel_width_fits_short_nick(self):
-        mp = MemberPanel()
-        mp._members = [{"username": "bob"}]
-        mp._sorted_voice_users = ["bob"]
-        mp._recompute_width()
-        # voice overhead + 3 = 26, which is > MIN_WIDTH(22) and < MAX_WIDTH(40)
-        self.assertEqual(mp._panel_width, _VOICE_OVERHEAD + 3)
 
-    def test_long_voice_nick_clipped_in_markup(self):
-        mp = MemberPanel()
-        long_nick = "a" * 32
-        mp._members = []
-        mp._sorted_voice_users = [long_nick]
-        mp._recompute_width()
-        markup = mp._build_markup()
-        self.assertNotIn(long_nick, markup)
-        self.assertIn("...", markup)
+# ── Volume icon tier tests (task 9.2) ─────────────────────────────────────────
+
+class TestVolumeIcon(unittest.TestCase):
+
+    def test_zero_is_muted(self):
+        self.assertEqual(_volume_icon(0), "🔇")
+
+    def test_one_is_low(self):
+        self.assertEqual(_volume_icon(1), "🔈")
+
+    def test_50_is_low(self):
+        self.assertEqual(_volume_icon(50), "🔈")
+
+    def test_51_is_medium(self):
+        self.assertEqual(_volume_icon(51), "🔉")
+
+    def test_100_is_medium(self):
+        self.assertEqual(_volume_icon(100), "🔉")
+
+    def test_149_is_medium(self):
+        self.assertEqual(_volume_icon(149), "🔉")
+
+    def test_150_is_high(self):
+        self.assertEqual(_volume_icon(150), "🔊")
+
+    def test_200_is_high(self):
+        self.assertEqual(_volume_icon(200), "🔊")
 
 
-# ── MemberPanel widget tests ─────────────────────────────────────────────────
+# ── MemberPanel server-roster tests (task 9.1) ───────────────────────────────
 
-class TestMemberPanel(unittest.IsolatedAsyncioTestCase):
+class TestMemberPanelServerRoster(unittest.IsolatedAsyncioTestCase):
 
-    async def test_set_members_updates_content(self):
-        """set_members() must render all usernames."""
+    async def test_online_section_header_shows_count(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
-
             mp = app.screen.query_one("#members", MemberPanel)
-            mp.set_members([
-                {"user_id": "1", "username": "alice"},
-                {"user_id": "2", "username": "bob"},
-            ])
+            mp.set_server_members(["alice", "bob"], [])
             await pilot.pause()
 
             markup = mp._build_markup()
+            self.assertIn("ONLINE — 2", markup)
             self.assertIn("alice", markup)
             self.assertIn("bob", markup)
 
-    async def test_update_voice_adds_speaker_prefix(self):
-        """update_voice() must show voice members in the In Voice section."""
+    async def test_offline_section_shown_when_populated(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
-
             mp = app.screen.query_one("#members", MemberPanel)
-            mp.set_members([
-                {"user_id": "1", "username": "alice"},
-                {"user_id": "2", "username": "bob"},
-            ])
-            mp.update_voice([{"user_id": "1", "username": "alice"}])
+            mp.set_server_members(["alice"], ["carol"])
             await pilot.pause()
 
             markup = mp._build_markup()
-            # alice should appear in In Voice section with speaker prefix
-            self.assertIn("🔊 alice", markup)
-            # bob should NOT appear in the In Voice section
-            self.assertNotIn("🔊 bob", markup)
-            self.assertIn("bob", markup)
+            self.assertIn("OFFLINE — 1", markup)
+            self.assertIn("carol", markup)
 
-    async def test_update_voice_clears_when_empty(self):
-        """Clearing voice users removes the In Voice section."""
+    async def test_offline_section_absent_when_empty(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
-
             mp = app.screen.query_one("#members", MemberPanel)
-            mp.set_members([{"user_id": "1", "username": "alice"}])
-            mp.update_voice([{"user_id": "1", "username": "alice"}])
+            mp.set_server_members(["alice"], [])
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertNotIn("OFFLINE", markup)
+
+    async def test_voice_user_shows_icon_and_percent(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
+            mp.update_voice([{"username": "alice"}])
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertIn("🔉", markup)
+            self.assertIn("100%", markup)
+
+    async def test_non_voice_online_user_has_no_icon(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["bob"], [])
             mp.update_voice([])
             await pilot.pause()
 
             markup = mp._build_markup()
+            self.assertIn("bob", markup)
+            self.assertNotIn("🔇", markup)
+            self.assertNotIn("🔈", markup)
+            self.assertNotIn("🔉", markup)
             self.assertNotIn("🔊", markup)
-            self.assertNotIn("In Voice", markup)
-            self.assertIn("alice", markup)
+
+    async def test_navigation_skips_to_voice_users(self):
+        """↓ navigation only stops on voice-active rows."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice", "bob"], [])
+            mp.update_voice([{"username": "alice"}, {"username": "bob"}])
+            mp.focus()
+            await pilot.pause()
+
+            self.assertEqual(mp._cursor, 0)
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertEqual(mp._cursor, 1)
 
 
-# ── Volume bar and keyboard interaction tests ────────────────────────────────
+# ── Volume adjustment tests ──────────────────────────────────────────────────
 
 class _MockVolumeSource:
     def __init__(self):
@@ -149,69 +194,74 @@ class _MockVolumeSource:
 
 class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
 
-    async def _setup(self):
-        app = TraxusApp()
-        pilot_ctx = app.run_test()
-        pilot = await pilot_ctx.__aenter__()
-        await app.switch_screen(ChatScreen())
-        await pilot.pause()
-        app._peer_manager = _MockVolumeSource()
-        mp = app.screen.query_one("#members", MemberPanel)
-        return app, pilot, pilot_ctx, mp
-
-    async def test_default_volume_bar_shows_half_filled(self):
-        """Default volume (100%) must render 5 filled + 5 empty blocks."""
+    async def test_default_volume_shows_medium_icon(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             await pilot.pause()
 
             markup = mp._build_markup()
-            self.assertIn("█████░░░░░", markup)
+            self.assertIn("🔉", markup)
             self.assertIn("100%", markup)
 
-    async def test_volume_bar_reflects_set_volume(self):
-        """After set_volume(alice, 40), bar should show 2 filled + 8 empty blocks."""
+    async def test_volume_40_shows_low_icon(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             app._peer_manager = _MockVolumeSource()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             app._peer_manager.set_volume("alice", 40)
             await pilot.pause()
 
             markup = mp._build_markup()
-            self.assertIn("██░░░░░░░░", markup)
-            self.assertIn(" 40%", markup)
+            self.assertIn("🔈", markup)
+            self.assertIn("40%", markup)
 
-    async def test_text_members_have_no_volume_bar(self):
-        """Members listed in the text section must not have a volume bar."""
+    async def test_volume_0_shows_muted_icon(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
+            app._peer_manager = _MockVolumeSource()
             mp = app.screen.query_one("#members", MemberPanel)
-            mp.set_members([{"username": "bob"}])
-            mp.update_voice([])
+            mp.set_server_members(["alice"], [])
+            mp.update_voice([{"username": "alice"}])
+            app._peer_manager.set_volume("alice", 0)
             await pilot.pause()
 
             markup = mp._build_markup()
-            self.assertIn("bob", markup)
-            self.assertNotIn("█", markup)
-            self.assertNotIn("░", markup)
+            self.assertIn("🔇", markup)
+
+    async def test_volume_160_shows_high_icon(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await app.switch_screen(ChatScreen())
+            await pilot.pause()
+            app._peer_manager = _MockVolumeSource()
+            mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
+            mp.update_voice([{"username": "alice"}])
+            app._peer_manager.set_volume("alice", 160)
+            await pilot.pause()
+
+            markup = mp._build_markup()
+            self.assertIn("🔊", markup)
+            self.assertIn("160%", markup)
 
     async def test_right_arrow_increases_volume(self):
-        """Pressing → while MemberPanel is focused must increase volume by 10."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             app._peer_manager = _MockVolumeSource()
             mp.focus()
@@ -223,12 +273,12 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app._peer_manager.get_volume("alice"), 110)
 
     async def test_left_arrow_decreases_volume(self):
-        """Pressing ← while MemberPanel is focused must decrease volume by 10."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             app._peer_manager = _MockVolumeSource()
             mp.focus()
@@ -239,13 +289,13 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(app._peer_manager.get_volume("alice"), 90)
 
-    async def test_left_at_0_does_not_go_below_0(self):
-        """Pressing ← when volume is 0 must stay at 0."""
+    async def test_left_at_0_stays_at_0(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             app._peer_manager = _MockVolumeSource()
             app._peer_manager.set_volume("alice", 0)
@@ -257,13 +307,13 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(app._peer_manager.get_volume("alice"), 0)
 
-    async def test_right_at_200_does_not_exceed_200(self):
-        """Pressing → when volume is 200 must stay at 200."""
+    async def test_right_at_200_stays_at_200(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice"], [])
             mp.update_voice([{"username": "alice"}])
             app._peer_manager = _MockVolumeSource()
             app._peer_manager.set_volume("alice", 200)
@@ -276,12 +326,12 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app._peer_manager.get_volume("alice"), 200)
 
     async def test_down_arrow_cycles_cursor(self):
-        """Pressing ↓ must move the cursor to the next voice user (wrapping)."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice", "bob"], [])
             mp.update_voice([{"username": "alice"}, {"username": "bob"}])
             mp.focus()
             await pilot.pause()
@@ -292,15 +342,15 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mp._cursor, 1)
             await pilot.press("down")
             await pilot.pause()
-            self.assertEqual(mp._cursor, 0)  # wraps
+            self.assertEqual(mp._cursor, 0)
 
     async def test_no_crash_with_no_voice_users(self):
-        """Arrow keys with no voice users must not raise."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members([], [])
             mp.update_voice([])
             mp.focus()
             await pilot.pause()
@@ -315,12 +365,12 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
                 self.fail(f"Arrow key with no voice users raised: {exc}")
 
     async def test_update_voice_resets_cursor(self):
-        """update_voice() must reset the cursor to 0."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await app.switch_screen(ChatScreen())
             await pilot.pause()
             mp = app.screen.query_one("#members", MemberPanel)
+            mp.set_server_members(["alice", "bob"], [])
             mp.update_voice([{"username": "alice"}, {"username": "bob"}])
             mp._cursor = 1
             mp.update_voice([{"username": "charlie"}])
@@ -329,73 +379,67 @@ class TestMemberPanelVolume(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mp._cursor, 0)
 
 
-# ── App-level member state tests ─────────────────────────────────────────────
+# ── App-level user_online / user_offline handler tests (task 9.3) ─────────────
 
-class TestMemberState(unittest.IsolatedAsyncioTestCase):
+class TestUserPresenceHandlers(unittest.IsolatedAsyncioTestCase):
 
     async def _on_chat(self, app, pilot):
         await app.switch_screen(ChatScreen())
         await pilot.pause()
 
-    async def test_user_list_stores_members(self):
-        """user_list message must populate _channel_members."""
+    async def test_user_online_adds_to_online_set(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
 
-            app.post_message(_server_msg({
-                "type": "user_list",
-                "channel": "general",
-                "users": [
-                    {"user_id": "1", "username": "alice"},
-                    {"user_id": "2", "username": "bob"},
-                ],
-            }))
+            app.post_message(_server_msg({"type": "user_online", "username": "alice"}))
             await pilot.pause()
 
-            self.assertIn("general", app._channel_members)
-            names = [m["username"] for m in app._channel_members["general"]]
-            self.assertIn("alice", names)
-            self.assertIn("bob", names)
+            self.assertIn("alice", app._online_users)
 
-    async def test_user_list_updates_panel(self):
-        """user_list for active channel must update MemberPanel."""
+    async def test_user_online_removes_from_offline_set(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
-            app.current_channel = "general"
+            app._known_offline_users.add("alice")
 
-            app.post_message(_server_msg({
-                "type": "user_list",
-                "channel": "general",
-                "users": [{"user_id": "1", "username": "alice"}],
-            }))
+            app.post_message(_server_msg({"type": "user_online", "username": "alice"}))
             await pilot.pause()
 
-            mp = app.screen.query_one("#members", MemberPanel)
-            self.assertIn("alice", mp._build_markup())
+            self.assertNotIn("alice", app._known_offline_users)
 
-    async def test_nick_changed_updates_members(self):
-        """nick_changed must update username in _channel_members."""
+    async def test_user_offline_removes_from_online_set(self):
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
-            app._channel_members["general"] = [
-                {"user_id": "1", "username": "alice"},
-            ]
-            app.current_channel = "general"
+            app._online_users.add("alice")
 
-            app.post_message(_server_msg({
-                "type": "nick_changed",
-                "old_nick": "alice",
-                "new_nick": "alice_dev",
-                "user_id": "1",
-            }))
+            app.post_message(_server_msg({"type": "user_offline", "username": "alice"}))
             await pilot.pause()
 
-            names = [m["username"] for m in app._channel_members["general"]]
-            self.assertIn("alice_dev", names)
-            self.assertNotIn("alice", names)
+            self.assertNotIn("alice", app._online_users)
+
+    async def test_user_offline_moves_to_known_offline_if_was_online(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app._online_users.add("alice")
+
+            app.post_message(_server_msg({"type": "user_offline", "username": "alice"}))
+            await pilot.pause()
+
+            self.assertIn("alice", app._known_offline_users)
+
+    async def test_user_offline_unknown_user_not_added_to_offline(self):
+        """A user that was never seen online should not end up in known_offline."""
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+
+            app.post_message(_server_msg({"type": "user_offline", "username": "ghost"}))
+            await pilot.pause()
+
+            self.assertNotIn("ghost", app._known_offline_users)
 
 
 # ── /who command tests ───────────────────────────────────────────────────────
@@ -407,7 +451,6 @@ class TestWhoCommand(unittest.IsolatedAsyncioTestCase):
         await pilot.pause()
 
     async def test_who_prints_members(self):
-        """/who must print member names in MessageView."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)
@@ -426,7 +469,6 @@ class TestWhoCommand(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(_line_count(mv), before)
 
     async def test_who_no_members_shows_info(self):
-        """/who with no member data shows an info message."""
         app = TraxusApp()
         async with app.run_test() as pilot:
             await self._on_chat(app, pilot)

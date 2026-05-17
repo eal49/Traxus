@@ -1074,5 +1074,73 @@ class TestRestartDeviceAsync(unittest.IsolatedAsyncioTestCase):
         await self._run_with_settings(app, body)
 
 
+# ── Task 9.4: ChannelSidebar voice member nesting ────────────────────────────
+
+class TestChannelSidebarVoiceNesting(unittest.IsolatedAsyncioTestCase):
+    """channel_list with voice_members must render nested non-interactive rows."""
+
+    async def _on_chat(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+
+    async def test_voice_members_appear_under_voice_channel(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+
+            channels = [
+                {"name": "general", "topic": "General", "member_count": 1, "type": "text"},
+                {"name": "lounge",  "topic": "Voice",   "member_count": 0, "type": "voice",
+                 "voice_members": ["alice", "bob"]},
+            ]
+            app.post_message(_server_msg({"type": "channel_list", "channels": channels}))
+            await pilot.pause()
+
+            sidebar = app.screen.query_one("#sidebar", ChannelSidebar)
+            from textual.widgets import Label
+            all_text = " ".join(str(lbl.content) for lbl in sidebar.query(Label))
+            self.assertIn("alice", all_text)
+            self.assertIn("bob", all_text)
+
+    async def test_nested_member_rows_are_not_focusable(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+
+            channels = [
+                {"name": "lounge", "topic": "Voice", "member_count": 0, "type": "voice",
+                 "voice_members": ["alice"]},
+            ]
+            app.post_message(_server_msg({"type": "channel_list", "channels": channels}))
+            await pilot.pause()
+
+            sidebar = app.screen.query_one("#sidebar", ChannelSidebar)
+            from textual.widgets import ListItem
+            items = list(sidebar.query_one("#channel-list").query(ListItem))
+            # Nested rows (no name, can_focus=False) must not be selectable
+            nested = [i for i in items if not i.name and not i.can_focus]
+            # At least the alice nested row should be present
+            self.assertGreater(len(nested), 0)
+
+    async def test_empty_voice_members_no_nested_rows(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+
+            channels = [
+                {"name": "lounge", "topic": "Voice", "member_count": 0, "type": "voice",
+                 "voice_members": []},
+            ]
+            app.post_message(_server_msg({"type": "channel_list", "channels": channels}))
+            await pilot.pause()
+
+            sidebar = app.screen.query_one("#sidebar", ChannelSidebar)
+            from textual.widgets import ListItem
+            items = list(sidebar.query_one("#channel-list").query(ListItem))
+            # Only header + channel row; no nested member rows
+            member_rows = [i for i in items if i.name == "lounge"]
+            self.assertEqual(len(member_rows), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

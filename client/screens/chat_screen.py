@@ -50,12 +50,12 @@ class ChatScreen(Screen):
         # before this screen was mounted and would have been silently dropped.
         from shared.message_types import C2S
         self.app._send({"type": C2S.LIST_CHANNELS})  # type: ignore[attr-defined]
-        # Populate member panel from cached data — the user_list message may
-        # have arrived before the screen widgets were fully mounted, causing
-        # update_members() to silently fail inside the try/except.
-        current = self.app.current_channel  # type: ignore[attr-defined]
-        members = self.app._channel_members.get(current, [])  # type: ignore[attr-defined]
-        self.update_members(members)
+        # Populate member panel from cached presence state — the auth_ok may
+        # have arrived before the screen widgets were fully mounted.
+        self.update_server_members(
+            sorted(self.app._online_users),   # type: ignore[attr-defined]
+            sorted(self.app._known_offline_users),  # type: ignore[attr-defined]
+        )
         # Sync must_change_password nudge — the reactive watcher fires before
         # ChatScreen is mounted so the StatusBar never receives the initial call.
         if self.app._must_change_password:  # type: ignore[attr-defined]
@@ -131,11 +131,14 @@ class ChatScreen(Screen):
         except Exception:
             pass
 
-    def update_members(self, members: list[dict]) -> None:
+    def update_server_members(self, online: list[str], offline: list[str]) -> None:
         try:
-            self.query_one("#members", MemberPanel).set_members(members)
+            self.query_one("#members", MemberPanel).set_server_members(online, offline)
         except Exception:
             pass
+
+    def update_members(self, members: list[dict]) -> None:
+        pass
 
     def update_member_voice(self, voice_users: list[dict]) -> None:
         try:
