@@ -56,6 +56,10 @@ class ChatScreen(Screen):
         current = self.app.current_channel  # type: ignore[attr-defined]
         members = self.app._channel_members.get(current, [])  # type: ignore[attr-defined]
         self.update_members(members)
+        # Sync must_change_password nudge — the reactive watcher fires before
+        # ChatScreen is mounted so the StatusBar never receives the initial call.
+        if self.app._must_change_password:  # type: ignore[attr-defined]
+            self.query_one("#status-bar", StatusBar).update_must_change_password(True)
 
     # ── Event delegation from widgets ────────────────────────────────────────
 
