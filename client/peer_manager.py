@@ -10,11 +10,47 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from shared.message_types import C2S
 
 log = logging.getLogger("traxus.peers")
+
+_OPUS_BITRATE = 16_000  # bps — clear voice at half the aiortc default
+_OPUS_DTX     = True    # silence → near-zero packets
+_OPUS_FEC     = True    # in-band FEC for packet-loss resilience
+
+
+def _patch_opus_sdp(sdp: str) -> str:
+    """Inject DTX, FEC and bitrate cap into the Opus fmtp line of an SDP."""
+    m = re.search(r"a=rtpmap:(\d+) opus/", sdp, re.IGNORECASE)
+    if not m:
+        return sdp
+    pt = m.group(1)
+    extras: dict[str, str] = {"maxaveragebitrate": str(_OPUS_BITRATE)}
+    if _OPUS_DTX:
+        extras["usedtx"] = "1"
+    if _OPUS_FEC:
+        extras["useinbandfec"] = "1"
+
+    fmtp_re = re.compile(rf"(a=fmtp:{re.escape(pt)} )(.+)")
+    if fmtp_re.search(sdp):
+        def _merge(match: re.Match) -> str:
+            existing = dict(
+                p.split("=", 1) for p in match.group(2).split(";") if "=" in p
+            )
+            existing.update(extras)
+            return match.group(1) + ";".join(f"{k}={v}" for k, v in existing.items())
+        return fmtp_re.sub(_merge, sdp)
+    # No fmtp line yet — insert one after the rtpmap line.
+    params = ";".join(f"{k}={v}" for k, v in extras.items())
+    return re.sub(
+        rf"(a=rtpmap:{re.escape(pt)} [^\r\n]+)",
+        rf"\1\r\na=fmtp:{pt} {params}",
+        sdp,
+    )
+
 
 if TYPE_CHECKING:
     from aiortc import RTCPeerConnection
@@ -59,7 +95,10 @@ class PeerManager:
         self._forks[username] = fork
         pc.addTrack(fork)
         offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
+        from aiortc import RTCSessionDescription
+        await pc.setLocalDescription(
+            RTCSessionDescription(sdp=_patch_opus_sdp(offer.sdp), type=offer.type)
+        )
         self._ws_worker.enqueue({
             "type": C2S.VOICE_OFFER,
             "to_user": username,
@@ -85,7 +124,9 @@ class PeerManager:
         from aiortc import RTCSessionDescription
         await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
         answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
+        await pc.setLocalDescription(
+            RTCSessionDescription(sdp=_patch_opus_sdp(answer.sdp), type=answer.type)
+        )
         self._ws_worker.enqueue({
             "type": C2S.VOICE_ANSWER,
             "to_user": from_user,

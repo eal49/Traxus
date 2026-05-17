@@ -1,9 +1,8 @@
+# password-renewal-nudge Specification
+
 ## Purpose
-
-Define the soft-nudge UX that appears in the status bar when the server indicates the user's password must be changed.
-
+TBD - created by archiving change user-password-change. Update Purpose after archive.
 ## Requirements
-
 ### Requirement: Status bar shows nudge when must_change_password is set
 When `auth_ok` carries `must_change_password: true`, the client SHALL append a visible nudge to the status bar until the password is changed.
 
@@ -32,3 +31,4 @@ The soft nudge is informational only. Text chat, voice channels, and all command
 #### Scenario: Chat works while nudge is active
 - **WHEN** the status bar nudge is displayed
 - **THEN** the user SHALL be able to send messages, join channels, and use voice without restriction
+

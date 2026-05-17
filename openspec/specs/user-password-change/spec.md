@@ -1,9 +1,8 @@
+# user-password-change Specification
+
 ## Purpose
-
-Define the self-service password change capability: the `/passwd` command, the `ChangePasswordScreen` modal, the wire protocol, and server-side validation rules.
-
+TBD - created by archiving change user-password-change. Update Purpose after archive.
 ## Requirements
-
 ### Requirement: /passwd command opens a change-password modal
 The client SHALL provide a `/passwd` slash command that opens a `ChangePasswordScreen` modal when the server is running in auth mode.
 
@@ -67,3 +66,4 @@ The client SHALL close the modal on success and display an inline error on failu
 #### Scenario: password_change_error shown in modal
 - **WHEN** the client receives `{ type: "password_change_error", reason: <reason> }`
 - **THEN** the modal SHALL remain open and display a human-readable error message corresponding to the reason
+

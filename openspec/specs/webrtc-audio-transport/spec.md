@@ -1,5 +1,7 @@
-## Requirements
+## Purpose
 
+Define the peer-to-peer WebRTC audio transport layer: peer connection lifecycle, MicTrack/MicFork fan-out, RemoteAudioSink playback, ICE negotiation, and Opus codec parameter negotiation.
+## Requirements
 ### Requirement: Client manages one RTCPeerConnection per remote voice participant
 The client SHALL create and maintain one `aiortc.RTCPeerConnection` for each other participant in the active voice channel. Connections SHALL be created when a peer joins the channel and closed when they leave or disconnect.
 
@@ -98,3 +100,15 @@ The client SHALL use a default STUN server (`stun:stun.l.google.com:19302`) for 
 #### Scenario: Custom STUN server respected
 - **WHEN** settings.json contains `{"stun_server": "stun:example.com:3478"}`
 - **THEN** the client SHALL use that URL in `RTCConfiguration`
+
+### Requirement: Opus codec parameters are negotiated on every peer connection
+The client SHALL apply the `opus-codec-params` capability (DTX, FEC, bitrate cap) to every outgoing SDP offer and answer. The SDP SHALL be patched after `createOffer`/`createAnswer` and before `setLocalDescription` using `_patch_opus_sdp()`. Both the offerer and the answerer SHALL apply the patch so that codec parameters are negotiated symmetrically on both sides of every peer connection.
+
+#### Scenario: Offer SDP contains Opus codec parameters
+- **WHEN** `connect()` generates an outgoing offer
+- **THEN** the offer SDP passed to `setLocalDescription` SHALL include `usedtx=1`, `useinbandfec=1`, and `maxaveragebitrate=16000` in the Opus fmtp line
+
+#### Scenario: Answer SDP contains Opus codec parameters
+- **WHEN** `on_offer()` generates an outgoing answer
+- **THEN** the answer SDP passed to `setLocalDescription` SHALL include `usedtx=1`, `useinbandfec=1`, and `maxaveragebitrate=16000` in the Opus fmtp line
+

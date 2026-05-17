@@ -372,5 +372,74 @@ class TestIceCandidateEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ice_calls), 0)
 
 
+_SDP_WITH_FMTP = (
+    "v=0\r\n"
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+    "a=rtpmap:111 opus/48000/2\r\n"
+    "a=fmtp:111 minptime=10\r\n"
+)
+
+_SDP_WITHOUT_FMTP = (
+    "v=0\r\n"
+    "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+    "a=rtpmap:111 opus/48000/2\r\n"
+)
+
+_SDP_NO_OPUS = (
+    "v=0\r\n"
+    "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+    "a=rtpmap:96 VP8/90000\r\n"
+)
+
+
+@unittest.skipUnless(WEBRTC_AVAILABLE, "aiortc not available")
+class TestPatchOpusSdp(unittest.TestCase):
+
+    def setUp(self):
+        from client.peer_manager import _patch_opus_sdp
+        self.patch = _patch_opus_sdp
+
+    def test_adds_dtx_fec_and_bitrate_to_existing_fmtp(self):
+        result = self.patch(_SDP_WITH_FMTP)
+        self.assertIn("usedtx=1", result)
+        self.assertIn("useinbandfec=1", result)
+        self.assertIn("maxaveragebitrate=16000", result)
+
+    def test_preserves_existing_fmtp_params(self):
+        result = self.patch(_SDP_WITH_FMTP)
+        self.assertIn("minptime=10", result)
+
+    def test_inserts_fmtp_line_when_absent(self):
+        result = self.patch(_SDP_WITHOUT_FMTP)
+        self.assertIn("a=fmtp:111", result)
+        self.assertIn("usedtx=1", result)
+        self.assertIn("useinbandfec=1", result)
+        self.assertIn("maxaveragebitrate=16000", result)
+
+    def test_no_opus_returns_sdp_unchanged(self):
+        result = self.patch(_SDP_NO_OPUS)
+        self.assertEqual(result, _SDP_NO_OPUS)
+
+    def test_overwrites_existing_usedtx_value(self):
+        sdp = (
+            "v=0\r\n"
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+            "a=rtpmap:111 opus/48000/2\r\n"
+            "a=fmtp:111 usedtx=0;useinbandfec=0\r\n"
+        )
+        result = self.patch(sdp)
+        self.assertIn("usedtx=1", result)
+        self.assertIn("useinbandfec=1", result)
+        self.assertNotIn("usedtx=0", result)
+        self.assertNotIn("useinbandfec=0", result)
+
+    def test_fmtp_line_inserted_after_rtpmap(self):
+        result = self.patch(_SDP_WITHOUT_FMTP)
+        lines = result.split("\r\n")
+        rtpmap_idx = next(i for i, l in enumerate(lines) if "a=rtpmap:111" in l)
+        fmtp_idx = next(i for i, l in enumerate(lines) if "a=fmtp:111" in l)
+        self.assertEqual(fmtp_idx, rtpmap_idx + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

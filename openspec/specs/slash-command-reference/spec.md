@@ -1,5 +1,7 @@
-## Requirements
+## Purpose
 
+Define the slash command reference specification: syntax rules, documented commands, and argument formats for all client-side slash commands.
+## Requirements
 ### Requirement: Slash command reference document exists
 The project SHALL contain `docs/commands.md` documenting every client slash command with its syntax, arguments, client-side effects, server messages triggered, and error conditions.
 
@@ -124,3 +126,11 @@ The `HELP_TEXT` constant in `client/commands.py` SHALL include an entry for `/au
 #### Scenario: audiotest in KNOWN_COMMANDS
 - **WHEN** the user types `/audioTest` (any case)
 - **THEN** `parse_input` SHALL return a `ParsedCommand` with `name == "audiotest"`
+
+### Requirement: /passwd command is documented
+`docs/commands.md` SHALL include an entry for `/passwd` following the same format as existing command entries.
+
+#### Scenario: /passwd entry present
+- **WHEN** a developer opens `docs/commands.md`
+- **THEN** they SHALL find an entry for `/passwd` describing: syntax (`/passwd`), no arguments, opens the ChangePasswordScreen modal, sends `change_password` to the server, and that it is disabled with an error message when the server has no auth mode enabled
+
