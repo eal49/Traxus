@@ -1,3 +1,18 @@
+## What's new in v0.3.3
+
+- **+6 dB global receive boost** — all remote voice audio is now amplified by
+  2× before per-participant volume scaling is applied. Raw Opus output sits
+  around −20 dBFS; most games and applications master audio at −6 to −12 dBFS.
+  The flat +6 dB lift closes that gap without touching the existing per-user
+  volume slider semantics. Users who have already calibrated individual volumes
+  will not notice any change in relative balance.
+- **Opus bandwidth optimisations** — every outgoing SDP offer and answer now
+  injects DTX (`usedtx=1`), in-band FEC (`useinbandfec=1`), and a 16 kbps
+  average-bitrate cap (`maxaveragebitrate=16000`) into the Opus `a=fmtp` line.
+  DTX reduces near-silent packets to near zero; FEC provides frame-loss
+  resilience at minimal overhead; the bitrate cap halves the default 32 kbps
+  Opus encoder rate while preserving clear voice quality.
+
 ## What's new in v0.3.1
 
 - **System tray icon** — a tray icon now reflects your live connection and PTT

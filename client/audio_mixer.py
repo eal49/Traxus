@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 _FRAME_DURATION = 0.020    # 20 ms per tick
 _DEFAULT_FRAME_SIZE = 960  # samples at 48 kHz; updated from first real frame
 _QUEUE_MAX = 20
+_GLOBAL_RECV_GAIN = 2.0    # +6 dB: compensates raw Opus decode level vs game audio
 
 
 class AudioMixer:
@@ -102,7 +103,7 @@ class AudioMixer:
                     except asyncio.QueueEmpty:
                         n_silent += 1
 
-                out = np.clip(mixed, -32768, 32767).astype(np.int16)
+                out = np.clip(mixed * _GLOBAL_RECV_GAIN, -32768, 32767).astype(np.int16)
 
                 if tick % 50 == 0:  # once per second
                     rms = float(np.sqrt(np.mean(out.astype(np.float64) ** 2)))

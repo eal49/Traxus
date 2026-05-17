@@ -60,9 +60,12 @@ class TestAudioMixerSingleUser(unittest.IsolatedAsyncioTestCase):
     """Single user's pushed frame passes through unchanged (volume 100 applied outside)."""
 
     async def test_single_user_frame_passes_through(self):
-        from client.audio_mixer import AudioMixer
+        from client.audio_mixer import AudioMixer, _GLOBAL_RECV_GAIN
 
         pcm = np.ones(960, dtype=np.int16) * 1000
+        expected = np.clip(
+            pcm.astype(np.float32) * _GLOBAL_RECV_GAIN, -32768, 32767
+        ).astype(np.int16)
         stream = _make_stream()
         mixer = AudioMixer(stream)
         mixer.add_user("alice")
@@ -78,7 +81,7 @@ class TestAudioMixerSingleUser(unittest.IsolatedAsyncioTestCase):
             if not (call[0][0] == 0).all()
         ]
         self.assertGreater(len(audio_writes), 0, "no non-silent frame was written")
-        np.testing.assert_array_equal(audio_writes[0], pcm)
+        np.testing.assert_array_equal(audio_writes[0], expected)
 
 
 @unittest.skipUnless(NUMPY_AVAILABLE, "numpy not available")
@@ -86,12 +89,12 @@ class TestAudioMixerTwoUsers(unittest.IsolatedAsyncioTestCase):
     """Two users' frames are summed correctly."""
 
     async def test_two_users_summed(self):
-        from client.audio_mixer import AudioMixer
+        from client.audio_mixer import AudioMixer, _GLOBAL_RECV_GAIN
 
         pcm_a = np.ones(960, dtype=np.int16) * 1000
         pcm_b = np.ones(960, dtype=np.int16) * 500
         expected = np.clip(
-            pcm_a.astype(np.float32) + pcm_b.astype(np.float32),
+            (pcm_a.astype(np.float32) + pcm_b.astype(np.float32)) * _GLOBAL_RECV_GAIN,
             -32768, 32767,
         ).astype(np.int16)
 
@@ -162,11 +165,13 @@ class TestAudioMixerMissingFrame(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(stream.write.call_count, 0)
 
     async def test_missing_frame_contributes_silence(self):
-        from client.audio_mixer import AudioMixer
+        from client.audio_mixer import AudioMixer, _GLOBAL_RECV_GAIN
 
         pcm_a = np.ones(960, dtype=np.int16) * 800
-        # bob has no frame — should contribute zeros
-        expected = pcm_a.copy()
+        # bob has no frame — should contribute zeros; gain still applied to alice's frame
+        expected = np.clip(
+            pcm_a.astype(np.float32) * _GLOBAL_RECV_GAIN, -32768, 32767
+        ).astype(np.int16)
 
         stream = _make_stream()
         mixer = AudioMixer(stream)
@@ -276,6 +281,78 @@ class TestAudioMixerClose(unittest.IsolatedAsyncioTestCase):
             await mixer.close()  # second close must not raise
         except Exception as exc:
             self.fail(f"second close() raised {exc!r}")
+
+
+@unittest.skipUnless(NUMPY_AVAILABLE, "numpy not available")
+class TestAudioMixerGlobalGain(unittest.IsolatedAsyncioTestCase):
+    """_GLOBAL_RECV_GAIN is applied to all mixed output before clip."""
+
+    async def test_global_gain_doubles_amplitude(self):
+        from client.audio_mixer import AudioMixer, _GLOBAL_RECV_GAIN
+
+        # Use an amplitude small enough that 2× stays within int16 range
+        amplitude = 4000
+        pcm = np.full(960, amplitude, dtype=np.int16)
+        stream = _make_stream()
+        mixer = AudioMixer(stream)
+        mixer.add_user("alice")
+        try:
+            mixer.push("alice", pcm)
+            await asyncio.sleep(0.040)
+        finally:
+            await mixer.close()
+
+        audio_writes = [
+            call[0][0] for call in stream.write.call_args_list
+            if not (call[0][0] == 0).all()
+        ]
+        self.assertGreater(len(audio_writes), 0, "no non-silent frame written")
+        expected_amplitude = int(amplitude * _GLOBAL_RECV_GAIN)
+        self.assertTrue(
+            (audio_writes[0] == expected_amplitude).all(),
+            f"expected all samples = {expected_amplitude}, got {audio_writes[0][:4]}…",
+        )
+
+    async def test_global_gain_clips_at_int16_max(self):
+        """Gain must not produce values outside int16 range."""
+        from client.audio_mixer import AudioMixer
+
+        pcm = np.full(960, 32767, dtype=np.int16)
+        stream = _make_stream()
+        mixer = AudioMixer(stream)
+        mixer.add_user("alice")
+        try:
+            mixer.push("alice", pcm)
+            await asyncio.sleep(0.040)
+        finally:
+            await mixer.close()
+
+        audio_writes = [
+            call[0][0] for call in stream.write.call_args_list
+            if not (call[0][0] == 0).all()
+        ]
+        self.assertGreater(len(audio_writes), 0)
+        self.assertTrue(
+            (audio_writes[0] == 32767).all(),
+            "clipping must prevent overflow above int16 max",
+        )
+
+    async def test_silence_unaffected_by_gain(self):
+        """Silence (all zeros) stays zero regardless of gain."""
+        from client.audio_mixer import AudioMixer
+
+        stream = _make_stream()
+        mixer = AudioMixer(stream)
+        try:
+            await asyncio.sleep(0.040)
+        finally:
+            await mixer.close()
+
+        for call in stream.write.call_args_list:
+            self.assertTrue(
+                (call[0][0] == 0).all(),
+                "silence frame must remain all-zeros after gain",
+            )
 
 
 if __name__ == "__main__":
