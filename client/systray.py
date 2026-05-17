@@ -102,7 +102,7 @@ try:
 
     SYSTRAY_AVAILABLE = True
 
-except ImportError:
+except Exception:
     class SystrayManager:  # type: ignore[no-redef]
         def start(self) -> None:
             pass
