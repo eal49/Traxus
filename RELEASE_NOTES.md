@@ -1,3 +1,21 @@
+## What's new in v0.3.4
+
+- **Discord-like member panel** — the right panel now shows a server-wide
+  **Online** and **Offline** roster instead of a channel-scoped list. Every
+  known user appears the moment they authenticate; voice-active users display
+  a volume icon (🔇/🔈/🔉/🔊) and percentage, with ←/→ volume adjustment
+  unchanged. Offline members are shown dimmed below an **OFFLINE — N** header.
+- **Voice channel member nesting** — the left sidebar now lists the current
+  occupants of each voice channel as non-interactive rows indented under the
+  channel name, so you can see who is in which channel without joining.
+- **Global presence events** — the server broadcasts `user_online` when a
+  client authenticates and `user_offline` when one disconnects. The `auth_ok`
+  response now includes `online_users` (currently connected) and `known_users`
+  (all registered accounts) so the roster is accurate from the first frame.
+- **`voice_members` in channel_list** — every `channel_list` message now
+  includes a `voice_members` array for each voice channel; the list is
+  rebroadcast to all clients on every voice join, leave, or disconnect.
+
 ## What's new in v0.3.3
 
 - **+6 dB global receive boost** — all remote voice audio is now amplified by
