@@ -2,7 +2,8 @@
 Admin utility: add or update a user in the Traxus credentials file.
 
 Usage:
-    TRAXUS_USERS=/etc/traxus/users.json python -m server.adduser <username>
+    TRAXUS_USERS=/home/ubuntu/traxus/users.json python -m server.adduser <username>
+    TRAXUS_USERS=/home/ubuntu/traxus/users.json python -m server.adduser <username> --permanent
 """
 from __future__ import annotations
 
@@ -25,14 +26,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    if not argv:
-        print("Usage: python -m server.adduser <username>", file=sys.stderr)
+    args = list(argv)
+    permanent = "--permanent" in args
+    args = [a for a in args if a != "--permanent"]
+
+    if not args:
+        print(
+            "Usage: python -m server.adduser <username> [--permanent]\n"
+            "  --permanent   Set password without requiring a change on first login",
+            file=sys.stderr,
+        )
         return 1
 
-    username = argv[0].strip()
+    username = args[0].strip()
     if not username:
         print("Error: username cannot be empty.", file=sys.stderr)
         return 1
+
+    must_change = not permanent
 
     while True:
         password = getpass.getpass(f"Password for {username!r}: ")
@@ -46,8 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         break
 
     from server import auth_store
-    auth_store.add_user(users_path, username, password)
-    print(f"User {username!r} written to {users_path}.")
+    auth_store.add_user(users_path, username, password, must_change=must_change)
+    flag_note = "" if must_change else " (permanent — no change required on first login)"
+    print(f"User {username!r} written to {users_path}.{flag_note}")
     return 0
 
 

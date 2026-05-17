@@ -43,7 +43,7 @@ if _users_path:
 
 conn_mgr = ConnectionManager()
 chan_reg  = ChannelRegistry()
-router   = MessageRouter(conn_mgr, chan_reg, _credential_store)
+router   = MessageRouter(conn_mgr, chan_reg, _credential_store, _users_path)
 
 
 async def client_handler(ws: websockets.asyncio.server.ServerConnection) -> None:

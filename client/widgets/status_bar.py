@@ -31,6 +31,7 @@ class StatusBar(Static):
         self._ptt_active = False
         self._vad_listening = False
         self._voice_channel = ""
+        self._must_change_password = False
 
     def _build_markup(self) -> str:
         color = _STATE_COLORS.get(self._state, "#dcddde")
@@ -45,6 +46,8 @@ class StatusBar(Static):
             markup += r"   [bold white]🎤 PTT ON[/bold white]"
         elif self._vad_listening:
             markup += r"   [bold yellow]🎤 LISTENING[/bold yellow]"
+        if self._must_change_password:
+            markup += r"   [bold yellow]⚠ /passwd[/bold yellow]"
         return markup
 
     def _refresh_content(self) -> None:
@@ -75,4 +78,8 @@ class StatusBar(Static):
 
     def update_voice_channel(self, name: str) -> None:
         self._voice_channel = name
+        self._refresh_content()
+
+    def update_must_change_password(self, flag: bool) -> None:
+        self._must_change_password = flag
         self._refresh_content()

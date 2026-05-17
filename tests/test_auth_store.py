@@ -104,7 +104,7 @@ class TestAddUser(unittest.TestCase):
             auth_store.add_user(path, "alice", "pass")
             with open(path) as f:
                 raw = json.load(f)
-            self.assertTrue(raw["alice"].startswith("$2b$"))
+            self.assertTrue(raw["alice"]["hash"].startswith("$2b$"))
 
 
 if __name__ == "__main__":

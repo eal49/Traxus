@@ -78,6 +78,25 @@ class TestAdduserMain(unittest.TestCase):
             self.assertIn("carol", store)
             self.assertTrue(auth_store.verify(store, "carol", "secret"))
 
+    def test_default_sets_must_change_true(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "users.json")
+            with patch.dict(os.environ, {"TRAXUS_USERS": path}):
+                with patch("getpass.getpass", side_effect=["mypassword", "mypassword"]):
+                    main(["dave"])
+            store = auth_store.load(path)
+            self.assertTrue(auth_store.get_must_change(store, "dave"))
+
+    def test_permanent_flag_sets_must_change_false(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "users.json")
+            with patch.dict(os.environ, {"TRAXUS_USERS": path}):
+                with patch("getpass.getpass", side_effect=["mypassword", "mypassword"]):
+                    result = main(["eve", "--permanent"])
+            self.assertEqual(result, 0)
+            store = auth_store.load(path)
+            self.assertFalse(auth_store.get_must_change(store, "eve"))
+
 
 if __name__ == "__main__":
     unittest.main()

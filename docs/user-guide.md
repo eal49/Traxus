@@ -279,6 +279,24 @@ dismiss.
 
 Settings are saved to `~/.config/traxus/settings.json` and loaded on next launch.
 
+### Changing your password
+
+If the server has password authentication enabled, you can change your account password at any time with `/passwd`:
+
+1. Type `/passwd` and press **Enter**.
+2. A modal dialog opens with three fields: **Current password**, **New password**, and **Confirm new password**.
+3. Fill in all three fields and press **Enter** (or click **Save**).
+4. If successful, the dialog closes and your new password takes effect immediately.
+
+Password requirements:
+- Minimum **10 characters**
+- Must be **different** from your current password
+- Both "new password" fields must match exactly
+
+Press **Escape** to close the dialog without changing anything.
+
+**First-login nudge:** When a server admin provisions your account with a temporary password, the status bar shows `⚠ /passwd` in bold yellow as a reminder to set a permanent password. The nudge disappears once you successfully change your password. There is no hard lock-out — you can continue using the client before changing it.
+
 ---
 
 ## 7. System Tray Icon
@@ -351,6 +369,7 @@ After this, the icon stays visible in the taskbar whenever the client is running
 | `/color <name\|#hex>` | Set your nick colour. Use `reset` to clear. |
 | `/quote ` | Enter message selection mode to quote a line. |
 | `/pin ` | Enter message selection mode to pin a line. |
+| `/passwd` | Change your account password (requires server auth). |
 | `/audioTest` | Send 10 test tones over the active voice channel. |
 | `/help` | Print the command reference inline. |
 | `/quit` | Disconnect and exit. |

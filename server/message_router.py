@@ -6,7 +6,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
+from shared.message_types import C2S, S2C, AuthError, ErrorCode, PasswordChangeError, VERSION
 from server import auth_store as _auth_store_mod
 
 if TYPE_CHECKING:
@@ -28,26 +28,29 @@ class MessageRouter:
         conn_mgr: "ConnectionManager",
         chan_reg: "ChannelRegistry",
         auth_store: "dict | None" = None,
+        auth_store_path: "str | None" = None,
     ) -> None:
         self._conn = conn_mgr
         self._chan = chan_reg
         self._auth_store = auth_store
+        self._auth_store_path = auth_store_path
         self._handlers = {
-            C2S.AUTH:          self._handle_auth,
-            C2S.JOIN:          self._handle_join,
-            C2S.LEAVE:         self._handle_leave,
-            C2S.MESSAGE:       self._handle_message,
-            C2S.NICK:          self._handle_nick,
-            C2S.CREATE:        self._handle_create,
-            C2S.LIST_CHANNELS: self._handle_list_channels,
-            C2S.LIST_MEMBERS:  self._handle_list_members,
-            C2S.PING:          self._handle_ping,
-            C2S.VOICE_JOIN:    self._handle_voice_join,
-            C2S.VOICE_LEAVE:   self._handle_voice_leave,
-            C2S.VOICE_OFFER:   self._handle_voice_signal,
-            C2S.VOICE_ANSWER:  self._handle_voice_signal,
-            C2S.VOICE_ICE:     self._handle_voice_signal,
-            C2S.PIN_MESSAGE:   self._handle_pin_message,
+            C2S.AUTH:            self._handle_auth,
+            C2S.JOIN:            self._handle_join,
+            C2S.LEAVE:           self._handle_leave,
+            C2S.MESSAGE:         self._handle_message,
+            C2S.NICK:            self._handle_nick,
+            C2S.CREATE:          self._handle_create,
+            C2S.LIST_CHANNELS:   self._handle_list_channels,
+            C2S.LIST_MEMBERS:    self._handle_list_members,
+            C2S.PING:            self._handle_ping,
+            C2S.VOICE_JOIN:      self._handle_voice_join,
+            C2S.VOICE_LEAVE:     self._handle_voice_leave,
+            C2S.VOICE_OFFER:     self._handle_voice_signal,
+            C2S.VOICE_ANSWER:    self._handle_voice_signal,
+            C2S.VOICE_ICE:       self._handle_voice_signal,
+            C2S.PIN_MESSAGE:     self._handle_pin_message,
+            C2S.CHANGE_PASSWORD: self._handle_change_password,
         }
 
     # ── Entry point ───────────────────────────────────────────────────────────
@@ -136,12 +139,15 @@ class MessageRouter:
         client = self._conn.register(ws, username)
         log.info("AUTH  user=%s id=%s", username, client.user_id)
 
-        await self._send(ws, {
+        auth_ok: dict = {
             "type": S2C.AUTH_OK,
             "user_id": client.user_id,
             "username": username,
             "server_version": VERSION,
-        })
+        }
+        if self._auth_store is not None and _auth_store_mod.get_must_change(self._auth_store, username):
+            auth_ok["must_change_password"] = True
+        await self._send(ws, auth_ok)
 
         # Auto-join #general
         await self._do_join(client, ws, "general")
@@ -423,6 +429,36 @@ class MessageRouter:
         self._chan.set_pin(channel, pin_payload)
         await self._conn.broadcast_to_channel(channel, pin_payload)
         log.info("PIN   #%s msg_id=%s by %s", channel, msg_id, client.username)
+        return client
+
+    async def _handle_change_password(self, payload, ws, client):
+        if self._auth_store is None or self._auth_store_path is None:
+            await self._send(ws, {
+                "type": S2C.PASSWORD_CHANGE_ERROR,
+                "reason": PasswordChangeError.AUTH_DISABLED,
+            })
+            return client
+
+        old_password = str(payload.get("old_password", ""))
+        new_password = str(payload.get("new_password", ""))
+
+        error = _auth_store_mod.change_password(
+            self._auth_store_path, client.username, old_password, new_password
+        )
+        if error is not None:
+            await self._send(ws, {
+                "type": S2C.PASSWORD_CHANGE_ERROR,
+                "reason": error,
+            })
+            return client
+
+        # Reload the in-memory store so subsequent logins see the new hash.
+        reloaded = _auth_store_mod.load(self._auth_store_path)
+        if reloaded is not None:
+            self._auth_store = reloaded
+
+        log.info("PASSWD user=%s changed password", client.username)
+        await self._send(ws, {"type": S2C.PASSWORD_CHANGED})
         return client
 
     async def _handle_voice_signal(self, payload, ws, client):

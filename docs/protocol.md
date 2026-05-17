@@ -242,6 +242,28 @@ Leave a voice channel and stop receiving/sending audio for it.
 
 ---
 
+### change_password
+
+Change the authenticated user's own password. Requires the server to have `TRAXUS_USERS` configured.
+
+```json
+{
+  "type": "change_password",
+  "old_password": "currentpassword",
+  "new_password": "mynewpassword1"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"change_password"` |
+| `old_password` | string | Yes | Current password for verification. |
+| `new_password` | string | Yes | Desired new password. Minimum 10 characters. Must differ from `old_password`. |
+
+**S2C responses:** `password_changed` on success, `password_change_error` on failure.
+
+---
+
 ### voice_offer
 
 Send a WebRTC SDP offer to a specific peer. The server relays it to the target user.
@@ -327,6 +349,7 @@ Authentication accepted.
 | `user_id` | string | UUID4 assigned to this connection. |
 | `username` | string | Confirmed display name (matches the `auth` request). |
 | `server_version` | string | Server version string. |
+| `must_change_password` | boolean | Present and `true` only when the server admin provisioned the account with a temporary password. The client should prompt the user to run `/passwd`. |
 
 Immediately followed by `joined` (for `#general`) and `channel_list`.
 
@@ -353,6 +376,49 @@ Authentication rejected.
 | `invalid_username` | Username is empty, over 32 chars, or contains spaces. |
 | `version_mismatch` | Client version does not match server version. Connection is closed. |
 | `wrong_password` | Password missing or incorrect; also returned for unknown usernames to prevent enumeration. Connection is closed. |
+
+---
+
+### password_changed
+
+The user's password was changed successfully. Sent in response to a `change_password` message.
+
+```json
+{ "type": "password_changed" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"password_changed"` |
+
+The server also clears the `must_change` flag for the account. The client should dismiss any open password-change screen and clear the status bar nudge.
+
+---
+
+### password_change_error
+
+The password change request was rejected. Sent in response to a `change_password` message.
+
+```json
+{
+  "type": "password_change_error",
+  "reason": "wrong_password"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"password_change_error"` |
+| `reason` | string | Machine-readable reason (see table below). |
+
+**Reason values:**
+
+| Reason | Meaning |
+|---|---|
+| `wrong_password` | `old_password` did not match the stored credential. |
+| `too_short` | `new_password` is fewer than 10 characters. |
+| `same_password` | `new_password` is identical to the current password. |
+| `auth_disabled` | The server has no `TRAXUS_USERS` store configured; password changes are not supported. |
 
 ---
 

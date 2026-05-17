@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.connection_manager import ConnectionManager
 from server.channel_registry import ChannelRegistry
 from server.message_router import MessageRouter
-from shared.message_types import C2S, S2C, AuthError, ErrorCode, VERSION
+from shared.message_types import C2S, S2C, AuthError, ErrorCode, PasswordChangeError, VERSION
 
 
 # ── WebSocket stub ────────────────────────────────────────────────────────────
@@ -872,10 +872,10 @@ def _make_router_with_store(store):
     return MessageRouter(conn, chan, auth_store=store), conn, chan
 
 
-def _make_store(username, password):
+def _make_store(username, password, must_change: bool = False):
     import bcrypt
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    return {username: hashed}
+    return {username: {"hash": hashed, "must_change": must_change}}
 
 
 @unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
@@ -965,6 +965,156 @@ class TestAuthNoAuthMode(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(client)
         self.assertIsNotNone(self.ws.first_of_type(S2C.AUTH_OK))
+
+
+@unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
+class TestAuthMustChangePassword(unittest.IsolatedAsyncioTestCase):
+    """auth_ok carries must_change_password when the flag is set."""
+
+    def setUp(self):
+        self.ws = MockWs()
+
+    async def test_must_change_password_true_in_auth_ok(self):
+        store = _make_store("alice", "correct", must_change=True)
+        router, _, _ = _make_router_with_store(store)
+        await router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice",
+                "password": "correct", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        msg = self.ws.first_of_type(S2C.AUTH_OK)
+        self.assertIsNotNone(msg)
+        self.assertTrue(msg.get("must_change_password"))
+
+    async def test_must_change_password_absent_when_false(self):
+        store = _make_store("alice", "correct", must_change=False)
+        router, _, _ = _make_router_with_store(store)
+        await router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": "alice",
+                "password": "correct", "version": VERSION,
+            }),
+            self.ws, None,
+        )
+        msg = self.ws.first_of_type(S2C.AUTH_OK)
+        self.assertIsNotNone(msg)
+        self.assertFalse(msg.get("must_change_password"))
+
+
+@unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
+class TestChangePassword(unittest.IsolatedAsyncioTestCase):
+    """change_password handler."""
+
+    def setUp(self):
+        import tempfile, json as _json, bcrypt as _bcrypt
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmpdir.name, "users.json")
+        hashed = _bcrypt.hashpw(b"oldpassword1", _bcrypt.gensalt()).decode()
+        with open(self.path, "w") as f:
+            _json.dump({"alice": {"hash": hashed, "must_change": False}}, f)
+        store = MessageRouter.__new__(MessageRouter)  # don't call __init__
+        from server import auth_store as _as
+        loaded = _as.load(self.path)
+        conn = ConnectionManager()
+        chan = ChannelRegistry()
+        self.router = MessageRouter(conn, chan, auth_store=loaded, auth_store_path=self.path)
+        self.conn = conn
+        self.ws = MockWs()
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    async def _auth(self, username="alice", password="oldpassword1") -> object:
+        """Authenticate and return the client object."""
+        return await self.router.dispatch(
+            json.dumps({
+                "type": C2S.AUTH, "username": username,
+                "password": password, "version": VERSION,
+            }),
+            self.ws, None,
+        )
+
+    async def test_successful_change_sends_password_changed(self):
+        client = await self._auth()
+        ws2 = MockWs()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.CHANGE_PASSWORD,
+                "old_password": "oldpassword1",
+                "new_password": "newpassword2",
+            }),
+            ws2, client,
+        )
+        self.assertIsNotNone(ws2.first_of_type(S2C.PASSWORD_CHANGED))
+
+    async def test_wrong_old_password_sends_error(self):
+        client = await self._auth()
+        ws2 = MockWs()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.CHANGE_PASSWORD,
+                "old_password": "wrong",
+                "new_password": "newpassword2",
+            }),
+            ws2, client,
+        )
+        msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], PasswordChangeError.WRONG_PASSWORD)
+
+    async def test_too_short_sends_error(self):
+        client = await self._auth()
+        ws2 = MockWs()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.CHANGE_PASSWORD,
+                "old_password": "oldpassword1",
+                "new_password": "short",
+            }),
+            ws2, client,
+        )
+        msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], PasswordChangeError.TOO_SHORT)
+
+    async def test_same_password_sends_error(self):
+        client = await self._auth()
+        ws2 = MockWs()
+        await self.router.dispatch(
+            json.dumps({
+                "type": C2S.CHANGE_PASSWORD,
+                "old_password": "oldpassword1",
+                "new_password": "oldpassword1",
+            }),
+            ws2, client,
+        )
+        msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], PasswordChangeError.SAME_PASSWORD)
+
+    async def test_no_auth_store_sends_auth_disabled(self):
+        conn = ConnectionManager()
+        chan = ChannelRegistry()
+        router_no_auth = MessageRouter(conn, chan, auth_store=None, auth_store_path=None)
+        # Register a client without going through auth
+        ws = MockWs()
+        from server.connection_manager import ConnectedClient
+        import uuid
+        ws2 = MockWs()
+        client = conn.register(ws2, "bob")
+        await router_no_auth.dispatch(
+            json.dumps({
+                "type": C2S.CHANGE_PASSWORD,
+                "old_password": "anything",
+                "new_password": "newpassword2",
+            }),
+            ws2, client,
+        )
+        msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["reason"], PasswordChangeError.AUTH_DISABLED)
 
 
 if __name__ == "__main__":

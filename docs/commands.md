@@ -397,6 +397,57 @@ finished.
 
 ---
 
+## /passwd
+
+Change your account password. Only available when the server has password authentication enabled.
+
+```
+/passwd
+```
+
+No arguments.
+
+**Client effect:** Opens the **Change Password** modal screen. **Nothing is sent to the server until you press Save.**
+
+The modal has three masked input fields:
+
+| Field | Description |
+|---|---|
+| **Current password** | Your existing password for verification. |
+| **New password** | The replacement password. Minimum 10 characters, must differ from the current password. |
+| **Confirm new password** | Must match the new password exactly (checked client-side before sending). |
+
+Press **Enter** or click **Save** to submit. Press **Escape** to cancel without sending anything.
+
+**C2S message sent (on Save):**
+```json
+{
+  "type": "change_password",
+  "old_password": "currentpassword",
+  "new_password": "mynewpassword1"
+}
+```
+
+**S2C responses:**
+
+| Type | When |
+|---|---|
+| `password_changed` | Success — screen closes, status bar nudge is cleared |
+| `password_change_error` | Failure — inline error message shown, screen stays open |
+
+**Error conditions (with inline messages):**
+
+| Server reason | Message shown |
+|---|---|
+| `wrong_password` | "Current password is incorrect." |
+| `too_short` | "New password must be at least 10 characters." |
+| `same_password` | "New password must differ from the current password." |
+| `auth_disabled` | Local error: "Password authentication is not enabled on this server." (command is rejected before sending) |
+
+**Status bar nudge:** When the server sends `must_change_password: true` in `auth_ok` (admin provisioned a temporary password), the status bar appends `⚠ /passwd` in bold yellow as a soft reminder. The nudge is cleared automatically after a successful password change.
+
+---
+
 ## /settings
 
 Open the client settings menu.

@@ -8,7 +8,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.14%2B-blue?style=flat)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey?style=flat)
-![Tests](https://img.shields.io/badge/tests-617%20passing-brightgreen?style=flat)
+![Tests](https://img.shields.io/badge/tests-650%20passing-brightgreen?style=flat)
 
 </div>
 
@@ -125,6 +125,7 @@ If the server requires a password, fill in the **Password** field before connect
 | `/channels` | List all channels |
 | `/who` | List members in the current channel |
 | `/settings` | Open settings (PTT mode, PTT key, VAD sensitivity, audio devices) |
+| `/passwd` | Change your account password (requires server auth) |
 | `/audioTest` | Run a loopback audio test on the current voice channel |
 | `/help` | Print command reference inline |
 | `/quit` | Disconnect and exit |
@@ -210,10 +211,10 @@ traxus/
 python -m unittest discover -s tests -v
 ```
 
-617 tests covering every server component, the full command parser, WebRTC
+650 tests covering every server component, the full command parser, WebRTC
 signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, audio device
-selection, password authentication, systray state logic, and end-to-end
-integration tests with a real server subprocess and Textual pilot.
+selection, password authentication, password change flow, systray state logic,
+and end-to-end integration tests with a real server subprocess and Textual pilot.
 
 ---
 

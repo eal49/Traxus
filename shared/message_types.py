@@ -23,8 +23,9 @@ class C2S:
     VOICE_OFFER   = "voice_offer"
     VOICE_ANSWER  = "voice_answer"
     VOICE_ICE     = "voice_ice"
-    PIN_MESSAGE   = "pin_message"
-    UNPIN_MESSAGE = "unpin_message"
+    PIN_MESSAGE      = "pin_message"
+    UNPIN_MESSAGE    = "unpin_message"
+    CHANGE_PASSWORD  = "change_password"
 
 
 # ── Server → Client ──────────────────────────────────────────────────────────
@@ -46,7 +47,9 @@ class S2C:
     VOICE_OFFER     = "voice_offer"
     VOICE_ANSWER    = "voice_answer"
     VOICE_ICE       = "voice_ice"
-    PIN_ADDED       = "pin_added"
+    PIN_ADDED            = "pin_added"
+    PASSWORD_CHANGED     = "password_changed"
+    PASSWORD_CHANGE_ERROR = "password_change_error"
 
 
 # ── Auth error reasons ────────────────────────────────────────────────────────
@@ -59,6 +62,13 @@ class AuthError:
 
 
 # ── Server error codes ────────────────────────────────────────────────────────
+
+class PasswordChangeError:
+    WRONG_PASSWORD = "wrong_password"
+    TOO_SHORT      = "too_short"
+    SAME_PASSWORD  = "same_password"
+    AUTH_DISABLED  = "auth_disabled"
+
 
 class ErrorCode:
     NOT_AUTHENTICATED    = "not_authenticated"

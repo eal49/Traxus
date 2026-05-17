@@ -78,10 +78,11 @@ class TraxusApp(App):
 
     # ── App-level reactive state ──────────────────────────────────────────────
 
-    connection_state: reactive[str]    = reactive("disconnected")
-    current_channel: reactive[str]     = reactive("general")
+    connection_state: reactive[str]      = reactive("disconnected")
+    current_channel: reactive[str]       = reactive("general")
     current_voice_channel: reactive[str] = reactive("")
-    username: reactive[str]            = reactive("")
+    username: reactive[str]              = reactive("")
+    _must_change_password: reactive[bool] = reactive(False)
 
     # ── Custom messages posted by WsWorker ────────────────────────────────────
 
@@ -107,6 +108,7 @@ class TraxusApp(App):
         self._voice_users: list[dict] = []
         self._selection_command: str | None = None
         self._peer_manager = None  # PeerManager | None, created on vjoin
+        self._server_has_auth: bool = False
         self._transmitting: bool = False
         from client.settings import load_settings
         settings = load_settings()
@@ -137,6 +139,7 @@ class TraxusApp(App):
 
     def connect_to_server(self, server_url: str, username: str, password: str = "") -> None:
         self.username = username
+        self._server_has_auth = bool(password)
         self._ws_worker = WsWorker(self)
         self.run_worker(
             self._ws_worker.run(server_url, username, password),
@@ -305,6 +308,13 @@ class TraxusApp(App):
                     self._local("Audio test already in progress.")
                 else:
                     asyncio.get_running_loop().create_task(self._audio_test_task())
+
+            case "passwd":
+                if not self._server_has_auth:
+                    self._local("Password authentication is not enabled on this server.")
+                else:
+                    from client.screens.change_password_screen import ChangePasswordScreen
+                    self.push_screen(ChangePasswordScreen())
 
             case "quit":
                 if self._ws_worker:
@@ -581,6 +591,9 @@ class TraxusApp(App):
         match t:
             case "auth_ok":
                 self.username = payload.get("username", self.username)
+                if payload.get("must_change_password"):
+                    self._must_change_password = True
+                    self._server_has_auth = True
                 if self._ws_worker:
                     self._ws_worker.notify_auth_ok()
                 # Switch to chat screen
@@ -706,6 +719,26 @@ class TraxusApp(App):
                         payload.get("sdpMLineIndex", 0),
                     ))
 
+            case S2C.PASSWORD_CHANGED:
+                self._must_change_password = False
+                try:
+                    from client.screens.change_password_screen import ChangePasswordScreen
+                    screen = self.screen
+                    if isinstance(screen, ChangePasswordScreen):
+                        screen.dismiss(None)
+                except Exception:
+                    pass
+
+            case S2C.PASSWORD_CHANGE_ERROR:
+                reason = payload.get("reason", "")
+                try:
+                    from client.screens.change_password_screen import ChangePasswordScreen
+                    screen = self.screen
+                    if isinstance(screen, ChangePasswordScreen):
+                        screen.show_server_error(reason)
+                except Exception:
+                    pass
+
             case "pin_added":
                 if chat:
                     chat.update_pin(payload)
@@ -758,6 +791,15 @@ class TraxusApp(App):
 
     def watch_connection_state(self, state: str) -> None:
         self._update_tray()
+
+    def watch__must_change_password(self, flag: bool) -> None:
+        chat = self._chat()
+        if chat:
+            try:
+                from client.widgets.status_bar import StatusBar
+                chat.query_one(StatusBar).update_must_change_password(flag)
+            except Exception:
+                pass
 
     def watch_current_voice_channel(self, name: str) -> None:
         chat = self._chat()
@@ -944,6 +986,10 @@ class TraxusApp(App):
         settings = load_settings()
         settings["nick_color"] = hex_or_empty
         save_settings(settings)
+
+    def send_ws(self, payload: dict) -> None:
+        """Public alias for screens/widgets to enqueue a message."""
+        self._send(payload)
 
     def _send(self, payload: dict) -> None:
         if self._ws_worker:
