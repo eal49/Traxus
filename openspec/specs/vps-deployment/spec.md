@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Server-only requirements file exists
 The repository SHALL contain `deploy/requirements-server.txt` listing only the dependencies required to run the server (excluding TUI and audio packages).
@@ -8,9 +8,9 @@ The repository SHALL contain `deploy/requirements-server.txt` listing only the d
 - **THEN** it SHALL list `websockets` with a version pin and no other runtime packages
 
 ### Requirement: Caddyfile configures reverse proxy with TLS
-The repository SHALL contain `deploy/Caddyfile` that configures Caddy to terminate TLS for a Duck DNS subdomain and proxy WebSocket traffic to the local server port.
+The repository SHALL contain `deploy/Caddyfile` that configures Caddy to terminate TLS for a custom domain or subdomain and proxy WebSocket traffic to the local server port.
 
-#### Scenario: Caddyfile targets Duck DNS hostname
+#### Scenario: Caddyfile targets a custom hostname
 - **WHEN** an operator replaces the placeholder hostname in `deploy/Caddyfile`
 - **THEN** Caddy SHALL obtain a Let's Encrypt certificate for that hostname via HTTP-01 challenge and proxy all traffic to `localhost:8765`
 
@@ -34,15 +34,15 @@ The repository SHALL contain `deploy/traxus-server.service` that runs the Traxus
 - **THEN** `TRAXUS_HOST` SHALL be set to `127.0.0.1` so the server is not directly reachable from outside the VPS
 
 ### Requirement: Operator deployment guide exists
-The repository SHALL contain `deploy/deploy.md` with step-by-step instructions for deploying the Traxus server on an Ubuntu 24.04 VPS with Duck DNS and Caddy.
+The repository SHALL contain `deploy/deploy.md` with step-by-step instructions for deploying the Traxus server on an Ubuntu 24.04 VPS with Caddy and a domain name.
 
 #### Scenario: Guide covers VM provisioning
 - **WHEN** an operator reads `deploy/deploy.md`
 - **THEN** they SHALL find instructions for provisioning an Ubuntu 24.04 VPS and configuring the provider firewall to allow ports 22, 80, and 443
 
-#### Scenario: Guide covers Duck DNS setup
+#### Scenario: Guide covers domain name setup
 - **WHEN** an operator reads `deploy/deploy.md`
-- **THEN** they SHALL find instructions for registering a Duck DNS subdomain and pointing it to the VPS public IP
+- **THEN** they SHALL find instructions for pointing a domain name or free dynamic DNS subdomain to the VPS public IP
 
 #### Scenario: Guide covers Python and dependency installation
 - **WHEN** an operator reads `deploy/deploy.md`

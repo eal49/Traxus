@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Chat messages wrap to widget width
 The `MessageView` widget SHALL render chat messages with automatic line wrapping

@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: MicTestScreen displays a live spectrogram
 `MicTestScreen` SHALL render a rolling ASCII spectrogram (frequency × time) built

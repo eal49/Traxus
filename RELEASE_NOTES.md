@@ -1,3 +1,20 @@
+## What's new in v0.3.1
+
+- **System tray icon** — a tray icon now reflects your live connection and PTT
+  state at a glance, even when the terminal is minimised. Six states are shown:
+  Disconnected, Connected, Voice Connected, Listening (VAD monitoring), Speaking,
+  and Speaking & Listening (transmitting while others are present). Requires
+  `pystray>=0.19` and `Pillow>=9.0`; both are bundled in the `.exe` and macOS
+  binary. Install separately for source runs: `pip install pystray Pillow`. On
+  Windows the icon may appear in the notification overflow (`^` arrow) on first
+  run — drag it to the visible taskbar area to pin it.
+- **User guide** — a new end-user manual at `docs/user-guide.md` covers
+  installation, the interface, text chat, voice channels, settings, the system
+  tray, all slash commands, and keyboard shortcuts.
+- **Documentation cleanup** — all references to a specific DuckDNS subdomain
+  replaced with generic `yourdomain.example.com` placeholders throughout docs,
+  deploy guides, login screen placeholder, and release notes.
+
 ## What's new in v0.3.0
 
 - **Password authentication** — servers can now require a password to connect.

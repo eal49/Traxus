@@ -22,6 +22,7 @@ from textual.reactive import reactive
 from client.audio_engine import AUDIO_AVAILABLE, WEBRTC_AVAILABLE, AudioEngine
 from client.commands import HELP_TEXT, ParsedCommand, parse_input
 from client.screens.login_screen import LoginScreen
+from client.systray import SystrayManager, _compute_tray_state
 from client.widgets.input_bar import InputBar
 from client.widgets.message_view import MessageView, _strip_markup
 from client.ws_worker import WsWorker
@@ -118,12 +119,19 @@ class TraxusApp(App):
         self._nick_color: str = settings.get("nick_color", "")
         self._input_device: "str | None" = settings.get("input_device") or None
         self._output_device: "str | None" = settings.get("output_device") or None
+        try:
+            self._systray: SystrayManager | None = SystrayManager()
+            self._systray.start()
+        except Exception:
+            self._systray = None
         self.push_screen(LoginScreen())
 
     async def on_unmount(self) -> None:
         if self._peer_manager is not None:
             await self._peer_manager.close_all()
             self._peer_manager = None
+        if self._systray is not None:
+            self._systray.stop()
 
     # ── Called by LoginScreen ─────────────────────────────────────────────────
 
@@ -372,6 +380,7 @@ class TraxusApp(App):
         chat = self._chat()
         if chat:
             chat.update_ptt(True)
+        self._update_tray()
 
     def stop_ptt(self) -> None:
         if not self._transmitting:
@@ -383,6 +392,7 @@ class TraxusApp(App):
         chat = self._chat()
         if chat:
             chat.update_ptt(False)
+        self._update_tray()
 
     async def _handle_voice_state_webrtc(
         self, channel: str, users: list, prev_channel: str
@@ -435,6 +445,7 @@ class TraxusApp(App):
                     await self._peer_manager.connect(uname)
             for uname in existing - new_usernames:
                 await self._peer_manager.disconnect(uname)
+        self._update_tray()
 
     async def _audio_test_task(self) -> None:
         self._audio_test_running = True
@@ -508,6 +519,7 @@ class TraxusApp(App):
                 self.start_ptt()
         else:
             self._arm_vad_hangover()
+        self._update_tray()
 
     def _get_vad_threshold(self) -> float:
         """Resolve the current VAD threshold to a float."""
@@ -546,6 +558,18 @@ class TraxusApp(App):
             self._enter_vad_listening()
         elif not should_listen and is_listening:
             self._exit_vad_listening()
+
+    def _update_tray(self) -> None:
+        if self._systray is None:
+            return
+        state = _compute_tray_state(
+            self.connection_state,
+            self.current_voice_channel,
+            self._transmitting,
+            self._audio_engine._vad_active if AUDIO_AVAILABLE else False,
+            bool(self._peer_manager and self._peer_manager._peers),
+        )
+        self._systray.set_state(state)
 
     # ── Message handlers (posted by WsWorker) ────────────────────────────────
 
@@ -732,6 +756,9 @@ class TraxusApp(App):
             elif msg.state == "connected":
                 chat.append_system("Reconnected.")
 
+    def watch_connection_state(self, state: str) -> None:
+        self._update_tray()
+
     def watch_current_voice_channel(self, name: str) -> None:
         chat = self._chat()
         if chat:
@@ -742,6 +769,7 @@ class TraxusApp(App):
                 self.stop_ptt()
             if self._ptt_mode == "vad":
                 self._exit_vad_listening()
+        self._update_tray()
 
     # ── Selection mode ────────────────────────────────────────────────────────
 

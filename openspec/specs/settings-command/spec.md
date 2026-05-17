@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: /settings command opens a settings modal
 The client SHALL support a `/settings` slash command that opens a modal settings screen without sending any message to the server.

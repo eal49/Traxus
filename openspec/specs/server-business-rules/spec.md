@@ -1,4 +1,7 @@
-## ADDED Requirements
+## Purpose
+Document the server-side validation rules, auth guard, and state invariants enforced by the Traxus server in `docs/server-rules.md`.
+
+## Requirements
 
 ### Requirement: Server business rules reference document exists
 The project SHALL contain `docs/server-rules.md` documenting the server-side validation constraints, auth guard, and state invariants enforced by the Traxus server.
@@ -83,3 +86,26 @@ When a client disconnects, the server SHALL remove them from all voice channels 
 #### Scenario: Remaining voice members notified on disconnect
 - **WHEN** a client disconnects from a voice channel
 - **THEN** the server sends a `voice_state` update to remaining voice members of each channel the departing client was in
+
+---
+
+### Requirement: Auth guard documents credential verification mode
+`docs/server-rules.md` SHALL document that when `TRAXUS_USERS` is set, the auth guard additionally requires a valid bcrypt password match. The rule SHALL state that an incorrect or missing password causes `auth_error { reason: "wrong_password" }` and connection close.
+
+#### Scenario: Credential verification rule documented
+- **WHEN** a developer reads `docs/server-rules.md` auth guard section
+- **THEN** they SHALL find the rule: "When TRAXUS_USERS is configured, auth additionally checks bcrypt password; wrong or missing password → auth_error { reason: 'wrong_password' } and connection close"
+
+### Requirement: No-auth fallback rule documented
+`docs/server-rules.md` SHALL document that when `TRAXUS_USERS` is unset (or points to a missing file), the server operates in no-auth mode and accepts any valid username without a password.
+
+#### Scenario: No-auth fallback rule documented
+- **WHEN** a developer reads `docs/server-rules.md`
+- **THEN** they SHALL find the rule: "When TRAXUS_USERS is unset or the credentials file is absent, password verification is skipped entirely (no-auth mode)"
+
+### Requirement: Username enumeration prevention documented
+`docs/server-rules.md` SHALL document that the server returns `wrong_password` for both incorrect passwords AND unknown usernames when auth mode is active, to prevent username enumeration.
+
+#### Scenario: Enumeration prevention rule present
+- **WHEN** a developer reads `docs/server-rules.md`
+- **THEN** they SHALL find the rule: "Unknown username in auth mode returns wrong_password, not a distinct 'user not found' error"

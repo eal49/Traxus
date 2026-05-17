@@ -1,3 +1,6 @@
+## Purpose
+Document every C2S and S2C WebSocket message type used by Traxus, including field schemas, lifecycle, and transport details, in `docs/protocol.md`.
+
 ## Requirements
 
 ### Requirement: WebSocket protocol reference document exists
@@ -120,3 +123,26 @@ The `docs/protocol.md` file SHALL specify the transport layer, encoding, and mes
 #### Scenario: user_list client handling noted
 - **WHEN** a developer reads the `user_list` entry in `docs/protocol.md`
 - **THEN** they SHALL find a note stating the client uses the `users` array to populate the right-side member panel for the specified channel
+
+---
+
+### Requirement: auth C2S message documents optional password field
+`docs/protocol.md` SHALL document that the `auth` C2S message accepts an optional `password` field (string). The field table SHALL mark `password` as optional with a description noting it is required only when the server has `TRAXUS_USERS` configured.
+
+#### Scenario: password field present in auth field table
+- **WHEN** a developer reads the `auth` C2S entry in `docs/protocol.md`
+- **THEN** they SHALL find a row for `password` with type `string`, required `no`, and a description explaining it is only checked when the server runs with credentials configured
+
+### Requirement: auth_error documents wrong_password reason
+`docs/protocol.md` SHALL document `wrong_password` as a valid `reason` value in the `auth_error` S2C message, alongside existing reasons (`invalid_username`, `username_taken`).
+
+#### Scenario: wrong_password reason listed
+- **WHEN** a developer reads the `auth_error` S2C entry in `docs/protocol.md`
+- **THEN** they SHALL find `wrong_password` in the reasons table with a description: "Password missing or incorrect; also returned for unknown usernames to prevent enumeration"
+
+### Requirement: Connection lifecycle documents auth-mode behaviour
+`docs/protocol.md` connection lifecycle section SHALL note that when the server is configured with `TRAXUS_USERS`, a `password` field is required in the `auth` message and a missing or incorrect password results in `auth_error { reason: "wrong_password" }` followed by connection close.
+
+#### Scenario: Auth-mode behaviour in lifecycle section
+- **WHEN** a developer reads the lifecycle section
+- **THEN** they SHALL find a note that password verification applies only when `TRAXUS_USERS` is set on the server

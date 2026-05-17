@@ -1,5 +1,6 @@
-## ADDED Requirements
-
+## Purpose
+Persist the last-used server URL and username across sessions so returning users reach the chat screen faster.
+## Requirements
 ### Requirement: Login screen pre-fills server URL from saved settings
 On mount, the `LoginScreen` SHALL read `last_server` from `~/.config/traxus/settings.json` and pre-fill the server URL input with that value.
 
@@ -39,3 +40,30 @@ When the user successfully connects (auth acknowledged), the client SHALL write 
 #### Scenario: Missing keys fall back to empty string
 - **WHEN** `settings.json` exists but does not contain `last_server` or `last_username`
 - **THEN** `load_settings()` SHALL return `""` for both keys without error
+
+### Requirement: LoginScreen displays a Password input field
+The `LoginScreen` SHALL include a Password `Input` widget with `password=True` (masked characters), positioned below the username field. The field SHALL be optional — leaving it blank is valid for connecting to no-auth servers.
+
+#### Scenario: Password field rendered on login screen
+- **WHEN** the login screen opens
+- **THEN** a masked password input SHALL be visible below the username field
+
+#### Scenario: Blank password field connects to no-auth server
+- **WHEN** the user leaves the password field empty and presses Connect
+- **THEN** the client SHALL attempt connection without including a `password` key in the `auth` message
+
+#### Scenario: Filled password field included in auth message
+- **WHEN** the user enters a password and presses Connect
+- **THEN** the client SHALL include `"password": "<value>"` in the `auth` C2S message
+
+### Requirement: Password is never persisted to settings
+The client SHALL NOT write the contents of the password field to `settings.json`, either on connect or at any other time. The field SHALL always start empty on each launch.
+
+#### Scenario: Password absent from settings after connect
+- **WHEN** the user connects successfully with a password
+- **THEN** `~/.traxus/settings.json` SHALL NOT contain a `password` key
+
+#### Scenario: Password field empty on relaunch
+- **WHEN** the application is relaunched after a previous session that used a password
+- **THEN** the password field SHALL be empty (server URL and username may be pre-filled, but not password)
+

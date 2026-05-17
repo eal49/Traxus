@@ -41,7 +41,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi pystray Pillow
 
       - name: Build executable
         run: pyinstaller traxus.spec
@@ -71,7 +71,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi
+        run: pip install textual websockets sounddevice numpy aiortc av pyinstaller certifi pystray Pillow
 
       - name: Build executable
         run: pyinstaller traxus-macos.spec
@@ -146,7 +146,7 @@ jobs:
 
           ## Connecting
 
-          Launch the app, enter your server URL (e.g. `wss://yourname.duckdns.org`)
+          Launch the app, enter your server URL (e.g. `wss://yourdomain.example.com`)
           and a username to connect.
           EOF
 

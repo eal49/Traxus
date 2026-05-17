@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: README has a centered hero section
 The README SHALL open with a centered hero block containing the logo image, the project name as a heading, and a one-line tagline. The hero SHALL appear before any other content.

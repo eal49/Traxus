@@ -1,7 +1,7 @@
 # Traxus — Architecture & Design Documentation
 
-> **Version:** 0.2.3
-> **Last updated:** 2026-05-03
+> **Version:** 0.3.0
+> **Last updated:** 2026-05-14
 
 Traxus is a terminal-based chat application with real-time voice (push-to-talk)
 built on Python asyncio WebSockets and the Textual TUI framework. Think of it
@@ -61,15 +61,15 @@ as a minimal Discord/TeamSpeak that runs entirely in a terminal.
 ```
 traxus/
 ├── shared/                    ← Pure logic, no I/O, no framework deps
-│   ├── message_types.py       ← C2S, S2C, AuthError, ErrorCode constants + VERSION
-│   ├── voice_protocol.py      ← Binary frame pack/unpack for audio
-│   └── adpcm.py               ← IMA ADPCM codec (encode/decode)
+│   └── message_types.py       ← C2S, S2C, AuthError, ErrorCode constants + VERSION
 │
 ├── server/                    ← asyncio WebSocket server
 │   ├── main.py                ← Entry point, asyncio.serve(), connection loop
 │   ├── connection_manager.py  ← Client registry, broadcast helpers
 │   ├── channel_registry.py    ← Channel CRUD, message history (deque, 50 msgs)
-│   └── message_router.py      ← JSON dispatch table, voice relay
+│   ├── message_router.py      ← JSON dispatch table, voice relay
+│   ├── auth_store.py          ← bcrypt credential store (optional password auth)
+│   └── adduser.py             ← CLI: python -m server.adduser <username>
 │
 ├── client/                    ← Textual TUI + WebSocket client
 │   ├── main.py                ← Entry point (python -m client.main)
@@ -83,11 +83,14 @@ traxus/
 │   ├── commands.py            ← Slash command parser (ParsedCommand)
 │   ├── settings.py            ← ~/.config/traxus/settings.json persistence
 │   ├── screens/
-│   │   ├── login_screen.py    ← Server URL + username form
+│   │   ├── login_screen.py    ← Server URL, username, optional password form
 │   │   ├── chat_screen.py     ← 3-panel layout (sidebar, messages, members)
 │   │   ├── settings_screen.py ← PTT key/mode/VAD config + device selection modal
 │   │   ├── device_select_screen.py ← Async device picker (input/output)
-│   │   └── vad_calibration_screen.py ← Live energy bar chart for VAD tuning
+│   │   ├── vad_calibration_screen.py ← Live energy bar chart for VAD tuning
+│   │   ├── vad_sensitivity_screen.py ← VAD sensitivity preset picker
+│   │   ├── mic_test_screen.py ← Mic loopback test with spectrogram
+│   │   └── color_picker_screen.py ← Nick colour palette selector
 │   └── widgets/
 │       ├── channel_sidebar.py ← Text/voice channel list (ListView)
 │       ├── message_view.py    ← Scrolling RichLog with nick coloring
@@ -112,9 +115,9 @@ shared/message_types.py ◄──── server/message_router.py
                          ◄──── client/app.py, client/peer_manager.py
 
 shared/ has ZERO runtime dependencies (stdlib only).
-server/ depends on: websockets, shared/
-client/ depends on: textual, websockets, sounddevice (optional), numpy (optional),
-                    aiortc (optional), av (optional), shared/
+server/ depends on: websockets, shared/, bcrypt (optional — required only for auth)
+client/ depends on: textual, websockets, certifi, sounddevice (optional),
+                    numpy (optional), aiortc (optional), av (optional), shared/
 
 ```
 
@@ -124,15 +127,20 @@ client/ depends on: textual, websockets, sounddevice (optional), numpy (optional
 
 ### 3.1. Core Singletons
 
-The server creates exactly three objects at startup and passes them by reference
+The server creates four objects at startup and passes them by reference
 to every connection handler:
 
 ```
 main.py
-  ├─ ConnectionManager()   ← tracks all live clients
-  ├─ ChannelRegistry()     ← channels, topics, history
-  └─ MessageRouter(cm, cr) ← dispatches messages to handlers
+  ├─ ConnectionManager()          ← tracks all live clients
+  ├─ ChannelRegistry()            ← channels, topics, history
+  ├─ AuthStore (optional)         ← bcrypt credentials loaded from TRAXUS_USERS
+  └─ MessageRouter(cm, cr, auth)  ← dispatches messages to handlers
 ```
+
+`AuthStore` is `None` when `TRAXUS_USERS` is not set (no-auth mode). When set,
+it loads the JSON credentials file at startup; `MessageRouter` calls
+`auth_store.verify(username, password)` during the auth handshake.
 
 ### 3.2. Connection Lifecycle
 
@@ -339,6 +347,7 @@ TraxusApp
 │  ├─ Static (subtitle)
 │  ├─ Input  (server URL)
 │  ├─ Input  (username)
+│  ├─ Input  (password — optional, sent only when non-empty)
 │  ├─ Button (Connect)
 │  └─ Label  (error display)
 │
@@ -482,8 +491,8 @@ blurple, green, yellow, pink, red, cyan, magenta, orange.
 ### 5.1. Transport
 
 - **Text frames** carry JSON objects with a mandatory `"type"` field.
-- **Binary frames** carry audio data with a custom binary header.
-- **Protocol version:** `0.2.0` — enforced during auth handshake.
+- **Binary frames** are silently ignored — audio is peer-to-peer via WebRTC.
+- **Protocol version:** `0.3.0` — enforced during auth handshake.
 
 ### 5.2. Authentication Handshake
 
@@ -492,7 +501,8 @@ Client                              Server
   │                                    │
   │──── {type: "auth",            ────►│
   │      version: "0.2.0",            │
-  │      username: "alice"}            │
+  │      username: "alice",            │
+  │      password: "s3cr3t"}           │  ← omitted or "" for no-auth servers
   │                                    │
   │◄─── {type: "auth_ok",        ─────│  ← success
   │      user_id: "<uuid>",           │
@@ -514,8 +524,11 @@ Client                              Server
 | Version mismatch | `AuthError.VERSION_MISMATCH` | Client version != server version |
 | Invalid username | `AuthError.INVALID_USERNAME` | Empty, >32 chars, or contains spaces |
 | Username taken | `AuthError.USERNAME_TAKEN` | Another client has the same nick |
+| Wrong password | `AuthError.WRONG_PASSWORD` | Server has auth enabled; password incorrect or missing |
 
 On `VERSION_MISMATCH`, the server closes the WebSocket after sending the error.
+On `WRONG_PASSWORD`, the server sends the error but does not close the connection,
+allowing the client to prompt the user and retry.
 
 ### 5.3. Client-to-Server (C2S) Messages
 
@@ -829,8 +842,8 @@ required.
 │                          INTERNET                                    │
 │                                                                      │
 │   ┌─────────┐         DNS query                                     │
-│   │ Client  ├──────────────────────►  Duck DNS                      │
-│   │         │◄──────────────────────  yourserver.example.com → VPS IP│
+│   │ Client  ├──────────────────────►  DNS / Dynamic DNS              │
+│   │         │◄──────────────────────  yourdomain.example.com → VPS IP│
 │   └────┬────┘                                                        │
 │        │                                                             │
 │        │  TCP :443 (TLS/WSS)                                        │
@@ -878,7 +891,7 @@ required.
 ### 7.2. Request Flow (Client Connection)
 
 ```
- Client                Duck DNS         Caddy (:443)        Traxus (:8765)
+ Client              DNS Provider       Caddy (:443)        Traxus (:8765)
    │                      │                 │                     │
    │─ DNS lookup ────────►│                 │                     │
    │◄─ VPS IP ────────────│                 │                     │
@@ -917,7 +930,7 @@ Caddy handles TLS automatically:
 **Caddyfile:**
 
 ```
-yourserver.example.com {
+yourdomain.example.com {
     reverse_proxy localhost:8765
 }
 ```
@@ -969,13 +982,13 @@ relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
 
 | Component | Role | Details |
 |-----------|------|---------|
-| VPS (any provider) | VPS | Ubuntu 24.04, x86-64, 1+ vCore / 1+ GB RAM |
+| VPS (any provider) | Hosting | Ubuntu 24.04, x86-64, 1+ vCore / 1+ GB RAM |
 | Ubuntu 24.04 | OS | Python 3.12, systemd |
-| Dynamic DNS (e.g. Duck DNS) | Dynamic DNS | Free subdomain → VPS public IP |
+| Domain / Dynamic DNS | DNS | Any domain or free dynamic DNS (Duck DNS, No-IP, …) |
 | Caddy | Reverse proxy | TLS termination, auto Let's Encrypt, WSS→WS |
 | UFW | Firewall | Allow 22, 80, 443; deny 8765 |
 | systemd | Process manager | Auto-start, restart on failure |
-| Python venv | Isolation | Server dependencies only (`websockets`) |
+| Python venv | Isolation | Server dependencies only (`websockets`, `bcrypt` if auth enabled) |
 
 ---
 
@@ -983,8 +996,17 @@ relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
 
 ### 8.1. Authentication
 
-- **No passwords** — authentication is username-only (lobby-style).
-- Username must be 1-32 characters, no spaces.
+Authentication is **optional** — servers run in no-auth mode by default:
+
+- **No-auth mode (default):** Username-only. Any username not already taken is accepted.
+- **Password mode:** Enabled by setting `TRAXUS_USERS=/path/to/users.json` in the
+  systemd service. Accounts are created with `python -m server.adduser <username>`.
+  Passwords are bcrypt-hashed (work factor 12) and never transmitted back to clients.
+  The client sends the password in the `auth` message; a wrong or missing password
+  yields `WRONG_PASSWORD` without closing the connection (the user can retry).
+
+In both modes:
+- Username must be 1–32 characters, no spaces.
 - Duplicate usernames are rejected (`USERNAME_TAKEN`).
 - Each client gets a UUID4 `user_id` on successful auth.
 
@@ -995,7 +1017,7 @@ relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
   unreachable from the internet.
 - **No port exposure** — port 8765 is explicitly denied in UFW.
 - **Version handshake** — clients must match the server's protocol version
-  (`0.2.0`) or the connection is rejected and closed.
+  (`0.3.0`) or the connection is rejected and closed.
 
 ### 8.3. Input Validation
 
@@ -1010,11 +1032,12 @@ relays JSON signaling messages (offer/answer/ICE) and never touches PCM data.
 
 ### 8.4. Limitations
 
-- No end-to-end encryption (server sees all messages and audio).
-- No persistent accounts or password authentication.
+- No end-to-end encryption (server sees all messages in plaintext).
 - No rate limiting (a malicious client could flood the server).
 - No message persistence beyond the 50-message in-memory history per channel.
-- Server restart clears all state.
+- Server restart clears all in-memory state (channels, history, members).
+- Password authentication is per-server optional; clients cannot distinguish
+  a no-auth server from an auth server until the first connection attempt.
 
 ---
 
@@ -1113,16 +1136,16 @@ certbot. Caddy eliminates all of that.
 **Trade-off:** Additional process to manage. However, Caddy is a single static
 binary with systemd integration, so operational overhead is minimal.
 
-### 9.6. Dynamic DNS for Domain Names
+### 9.6. Domain Name Requirements
 
-**Decision:** Use a free dynamic DNS service instead of purchasing a domain.
+**Decision:** Any domain name or subdomain works — no specific provider is required.
 
-**Why:** Zero cost, instant setup, sufficient for personal/small-team use.
-A dynamic DNS subdomain is all that's needed for Let's Encrypt to issue a
-certificate (e.g. Duck DNS, No-IP, or similar providers).
+**Why:** Let's Encrypt issues certificates for any valid domain with DNS control.
+Free dynamic DNS services (Duck DNS, No-IP) are zero-cost and sufficient for
+personal or small-team use. Users who already own a domain can add an A record.
 
-**Trade-off:** Dependency on a free third-party service that could go down
-or discontinue. For production use, a purchased domain would be more reliable.
+**Trade-off:** Free dynamic DNS adds a third-party dependency. For production
+use, a purchased domain with a reputable registrar is more reliable.
 
 ### 9.7. No Database, No ORM
 
@@ -1138,18 +1161,26 @@ target scale.
 restarts. If Traxus needed to scale to hundreds of users, a database would
 become necessary.
 
-### 9.8. Username-Only Authentication
+### 9.8. Optional Password Authentication
 
-**Decision:** No passwords, no tokens, no OAuth. Users just pick a username.
+**Decision:** Passwords are opt-in at the server level; no-auth mode (username-only)
+remains the default. When enabled, credentials are bcrypt-hashed (work factor 12)
+and stored in a JSON file outside the repo.
 
-**Why:** Traxus is designed for trusted groups (friends, team members on a
-private VPS). Password management adds friction and security responsibility
-(hashing, storage, reset flows) without benefit when the server is already
-access-controlled at the network level.
+**Why:** Traxus targets trusted groups where the network perimeter (private VPS,
+TLS, firewall) already provides access control. Adding mandatory passwords would
+increase deployment friction with no benefit in that context. But for servers
+reachable by a wider audience, optional password protection is essential — hence
+the opt-in design controlled by the `TRAXUS_USERS` env var.
 
-**Trade-off:** Anyone who can reach the server can connect as any unclaimed
-username. No identity verification, no impersonation protection beyond "first
-come, first served."
+bcrypt was chosen over Argon2/scrypt because it has a long-established Python wheel
+(`bcrypt>=4.0`) with no C compiler required, work factor 12 is an appropriate
+default, and the use case (auth at connection time, not bulk hashing) does not
+demand Argon2's memory-hardness advantage.
+
+**Trade-off:** In no-auth mode anyone who can reach the server can connect as any
+unclaimed username. Operators who need access control must explicitly enable
+password auth and manage the credentials file.
 
 ### 9.9. Pre-Serialized Broadcasts
 

@@ -8,7 +8,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.14%2B-blue?style=flat)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey?style=flat)
-![Tests](https://img.shields.io/badge/tests-547%20passing-brightgreen?style=flat)
+![Tests](https://img.shields.io/badge/tests-617%20passing-brightgreen?style=flat)
 
 </div>
 
@@ -82,8 +82,9 @@
 ### 🚀 Self-hostable in minutes
 - Single asyncio WebSocket server, zero database, zero config files
 - Deploy on any Ubuntu 24.04 VPS (Hetzner, OVH, Linode, …)
-- TLS via Caddy + Let's Encrypt, subdomain via Duck DNS
-- Managed by systemd — see [docs/architecture.md](docs/architecture.md)
+- TLS via Caddy + Let's Encrypt (any domain or free dynamic DNS subdomain)
+- Optional password authentication — bcrypt-hashed credentials, enabled per-server
+- Managed by systemd — see [deploy/deploy.md](deploy/deploy.md)
 
 ---
 
@@ -103,7 +104,8 @@ python -m server.main
 python -m client.main
 ```
 
-On the login screen enter `ws://localhost:8765`, pick a username, press **Connect**.
+On the login screen enter `ws://localhost:8765`, pick a username, and press **Connect**.
+If the server requires a password, fill in the **Password** field before connecting.
 
 > **Python 3.14+** is required.
 
@@ -160,7 +162,8 @@ signalling messages (SDP offer/answer and ICE candidates).
 
 | Document | Description |
 |---|---|
-| [docs/commands.md](docs/commands.md) | Every slash command — syntax, arguments, server effects, error conditions |
+| [docs/user-guide.md](docs/user-guide.md) | End-user manual — connecting, text chat, voice, settings, system tray, shortcuts |
+| [docs/commands.md](docs/commands.md) | Slash command reference — syntax, arguments, server effects, error conditions |
 | [docs/protocol.md](docs/protocol.md) | Full WebSocket protocol — every C2S and S2C message type with field tables |
 | [docs/server-rules.md](docs/server-rules.md) | Server business rules — auth, validation, broadcast scope, state invariants |
 | [docs/architecture.md](docs/architecture.md) | Architecture deep-dive — audio pipeline, thread model, design decisions |
@@ -177,7 +180,9 @@ traxus/
 │   ├── main.py              # Entry point, per-connection handler
 │   ├── connection_manager.py
 │   ├── channel_registry.py
-│   └── message_router.py    # Dispatches every C2S message type
+│   ├── message_router.py    # Dispatches every C2S message type
+│   ├── auth_store.py        # bcrypt credential store (optional password auth)
+│   └── adduser.py           # CLI tool: python -m server.adduser <username>
 ├── client/                  # Textual TUI client
 │   ├── app.py               # Root App, reactive state, PTT bindings
 │   ├── ws_worker.py         # WebSocket recv / send / ping loops
@@ -192,7 +197,7 @@ traxus/
 │   │                        # MicTestScreen, ColorPickerScreen, DeviceSelectScreen
 │   └── widgets/             # ChannelSidebar, MessageView, InputBar,
 │                            # StatusBar, MemberPanel
-├── tests/                   # unittest suite (547 tests)
+├── tests/                   # unittest suite (606 tests)
 ├── docs/                    # Reference documentation
 └── openspec/                # Feature specs and design artefacts
 ```
@@ -205,10 +210,10 @@ traxus/
 python -m unittest discover -s tests -v
 ```
 
-547 tests covering every server component, the full command parser, WebRTC
+617 tests covering every server component, the full command parser, WebRTC
 signalling, VAD modes, PTT hold/toggle/mouse, per-user volume, audio device
-selection, and an end-to-end integration test with a real server subprocess
-and Textual pilot.
+selection, password authentication, systray state logic, and end-to-end
+integration tests with a real server subprocess and Textual pilot.
 
 ---
 
@@ -219,9 +224,11 @@ and Textual pilot.
 | Python 3.14+ | Everything |
 | `textual` | TUI client |
 | `websockets` | Client + server |
+| `certifi` | CA certificate bundle for `wss://` connections |
 | `sounddevice` | Microphone capture + speaker playback (voice) |
 | `numpy` | VAD energy computation + spectrum visualisation (voice) |
 | `aiortc` | WebRTC peer connections + Opus codec (voice) |
 | `av` | PyAV — audio frame decode/encode used by aiortc (voice) |
+| `bcrypt` | Password hashing for server auth (server only, optional) |
 
-Install everything: `pip install textual websockets sounddevice numpy aiortc av`
+Install everything: `pip install textual websockets certifi sounddevice numpy aiortc av bcrypt`

@@ -10,6 +10,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sounddevice
 import certifi
+import PIL
 
 # ── Locate native DLLs ────────────────────────────────────────────────────────
 
@@ -44,6 +45,8 @@ a = Analysis(
         *collect_data_files("av"),
         # CA certificate bundle for wss:// TLS verification.
         (certifi.where(), "certifi"),
+        # Systray PNG assets — bundled under SystrayIcons/ inside the archive.
+        ("Art/SystrayIcons", "SystrayIcons"),
     ],
     hiddenimports=[
         # websockets uses lazy submodule imports that PyInstaller misses.
@@ -64,6 +67,10 @@ a = Analysis(
         # av subpackages — Cython extensions loaded by name at runtime.
         "av.audio.frame",
         "av.video.frame",
+        # pystray and Pillow — loaded lazily in client/systray.py.
+        "pystray",
+        "PIL",
+        "PIL.Image",
     ],
     hookspath=[],
     hooksconfig={},

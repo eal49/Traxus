@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: AudioEngine tracks per-user volume levels
 `AudioEngine` SHALL maintain a `_per_user_volume` dict mapping username strings to integer percentage levels (0–200, default 100). The dict SHALL be readable and writable via `get_volume(username)` and `set_volume(username, level)` methods. `set_volume` SHALL clamp the supplied level to [0, 200].

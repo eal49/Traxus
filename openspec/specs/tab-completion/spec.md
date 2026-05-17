@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Tab completes slash-command names
 When the input bar contains a partial slash command (text starting with `/` followed by at least one character), pressing Tab SHALL cycle forward through alphabetically sorted command names that match the prefix. Shift+Tab SHALL cycle backward.

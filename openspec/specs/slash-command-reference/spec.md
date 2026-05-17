@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Slash command reference document exists
 The project SHALL contain `docs/commands.md` documenting every client slash command with its syntax, arguments, client-side effects, server messages triggered, and error conditions.

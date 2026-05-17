@@ -25,7 +25,7 @@ class LoginScreen(Screen):
         yield Static(LOGO, id="logo")
         yield Static("Terminal chat — connect to a Traxus server", id="subtitle")
         yield Input(
-            placeholder="Server URL  e.g. wss://yourname.duckdns.org",
+            placeholder="Server URL  e.g. wss://yourdomain.example.com",
             id="server-input",
         )
         yield Input(

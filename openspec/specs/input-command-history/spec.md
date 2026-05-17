@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Up/Down arrows navigate slash-command history
 When the input bar is focused, pressing Up/Down SHALL cycle through previously submitted slash commands. Only entries beginning with `/` are stored; plain chat messages SHALL NOT appear in history.

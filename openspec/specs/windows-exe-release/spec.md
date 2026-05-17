@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the GitHub Actions release workflow and PyInstaller build requirements for producing self-contained Windows and macOS client binaries.
+
+## Requirements
 
 ### Requirement: Release workflow triggers on version tag
 The GitHub Actions workflow SHALL trigger automatically when a tag matching
@@ -66,3 +70,23 @@ derived from commit messages between the previous and current tags.
 #### Scenario: Release asset uses versioned filename
 - **WHEN** tag `v0.3.0` is pushed
 - **THEN** the release asset is named `traxus-v0.3.0-windows.exe`
+
+### Requirement: Packaged binaries include systray icon assets
+The Windows `.exe` and macOS binary SHALL include the six PNG files from
+`Art/SystrayIcons/` so the system tray icon renders correctly when the
+application is run from the packaged binary.
+
+#### Scenario: Icons available in Windows executable
+- **WHEN** `traxus.exe` is launched on a Windows machine with no source repo present
+- **THEN** `Art/SystrayIcons/*.png` SHALL be resolvable via `sys._MEIPASS / "SystrayIcons"`
+- **THEN** the system tray icon SHALL display the correct state image
+
+#### Scenario: Icons available in macOS binary
+- **WHEN** the macOS binary is launched without the source repo present
+- **THEN** `Art/SystrayIcons/*.png` SHALL be resolvable via `sys._MEIPASS / "SystrayIcons"`
+- **THEN** the system tray icon SHALL display the correct state image
+
+#### Scenario: pystray and Pillow bundled in executables
+- **WHEN** the PyInstaller spec is used to build the executable
+- **THEN** `pystray` and `Pillow` SHALL be included in the bundle
+- **THEN** the tray icon SHALL appear without requiring any additional installation

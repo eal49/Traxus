@@ -1,6 +1,6 @@
 # Traxus Server — VPS Deployment Guide
 
-Target: Any Ubuntu 24.04 VPS (x86-64) + Duck DNS + Caddy + systemd.
+Target: Any Ubuntu 24.04 VPS (x86-64) + a domain name + Caddy + systemd.
 
 ---
 
@@ -22,13 +22,14 @@ Note the **public IP address** of your instance for the next step.
 
 ---
 
-## 2. Duck DNS Setup
+## 2. Domain Name Setup
 
-1. Go to [duckdns.org](https://www.duckdns.org) and sign in with Google, GitHub, or Reddit.
-2. Enter a subdomain name (e.g. `traxus`) and click **Add domain**.
-3. In the **current ip** field, enter your VPS public IP and click **Update IP**.
+You need a domain name or subdomain that points to your VPS IP address. Any of the following work:
 
-Your server will be reachable at `wss://yourname.duckdns.org` (substitute your chosen name).
+- **Free dynamic DNS** — [Duck DNS](https://www.duckdns.org), [No-IP](https://www.noip.com), or similar. Register a subdomain and set it to your VPS public IP.
+- **Own domain** — Add an A record pointing to your VPS IP in your registrar's DNS panel.
+
+In either case, once DNS is configured your server will be reachable at `wss://yourdomain.example.com` (substitute your actual domain). Allow a few minutes for DNS propagation before proceeding.
 
 ---
 
@@ -76,20 +77,10 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo 
 sudo apt update && sudo apt install -y caddy
 ```
 
-Write the Caddyfile, substituting your actual subdomain:
-
-```bash
-sudo tee /etc/caddy/Caddyfile > /dev/null << 'EOF'
-YOUR-NAME.duckdns.org {
-    reverse_proxy localhost:8765
-}
-EOF
-```
-
-The complete file should look like this (example for `yourname.duckdns.org`):
+Write the Caddyfile, substituting your actual domain:
 
 ```
-yourname.duckdns.org {
+yourdomain.example.com {
     reverse_proxy localhost:8765
 }
 ```
@@ -189,7 +180,7 @@ Check that the server is reachable over WSS. Install `websocat`:
 ```bash
 curl -L https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl -o websocat
 chmod +x websocat
-./websocat wss://YOUR-NAME.duckdns.org
+./websocat wss://yourdomain.example.com
 # Type {"type":"auth","username":"test"} and press Enter
 # You should receive {"type":"auth_ok",...}
 # Press Ctrl+C to exit
@@ -198,7 +189,7 @@ chmod +x websocat
 If `websocat` is not available, a quick curl test confirms port 443 is open:
 
 ```bash
-curl -I https://YOUR-NAME.duckdns.org
+curl -I https://yourdomain.example.com
 # Expect: HTTP/2 426 (Upgrade Required — the server expects a WebSocket upgrade, not HTTP)
 ```
 
@@ -231,7 +222,7 @@ tls-listening-port=5349
 fingerprint
 lt-cred-mech
 user=traxus:YOUR_TURN_PASSWORD
-realm=YOUR-NAME.duckdns.org
+realm=yourdomain.example.com
 cert=/path/to/fullchain.pem
 pkey=/path/to/privkey.pem
 ```
@@ -256,7 +247,7 @@ Each client then sets `stun_server` in `~/.traxus/settings.json` to the TURN URL
 
 ```json
 {
-  "stun_server": "turn:traxus:YOUR_TURN_PASSWORD@YOUR-NAME.duckdns.org:3478"
+  "stun_server": "turn:traxus:YOUR_TURN_PASSWORD@yourdomain.example.com:3478"
 }
 ```
 
@@ -269,7 +260,7 @@ Each client then sets `stun_server` in `~/.traxus/settings.json` to the TURN URL
 Users launch the Traxus client and enter:
 
 ```
-wss://YOUR-NAME.duckdns.org
+wss://yourdomain.example.com
 ```
 
 in the server URL field on the login screen.

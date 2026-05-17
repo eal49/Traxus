@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: /audioTest command sends synthetic tones over active voice channel
 The client SHALL provide an `/audioTest` slash command that generates 10 sine-wave tones and injects them as binary audio frames into the WebSocket send pipeline, relaying them through the server to all other clients in the same voice channel.

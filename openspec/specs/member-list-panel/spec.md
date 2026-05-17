@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: MemberPanel widget displays channel members
 The `ChatScreen` SHALL include a `MemberPanel` widget on the right side of the layout showing all members of the currently active text channel.
