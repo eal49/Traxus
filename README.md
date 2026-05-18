@@ -12,24 +12,7 @@
 
 </div>
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Traxus                                          alice @ #general    │
-├──────────────┬──────────────────────────────────────────────────────┤
-│ TEXT          │ [10:42] alice   hey, anyone around?                  │
-│  # general   │ [10:42] bob     yep — just finished the build        │
-│  # dev       │ [10:43] carol   joining dev-voice now                │
-│              │ [10:43] alice   on my way                            │
-│ VOICE        │                                                       │
-│  ◈ dev-voice │                                                       │
-│    · bob     │                                                       │
-│    · carol   │                                                       │
-├──────────────┴──────────────────────────────────────────────────────┤
-│ > /vjoin dev-voice                                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│ ws://localhost:8765  alice  ●  42 ms                                 │
-└─────────────────────────────────────────────────────────────────────┘
-```
+<img src="Art/screenshot.png" alt="Traxus chat interface" width="860">
 
 ---
 
