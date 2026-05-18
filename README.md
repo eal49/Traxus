@@ -71,6 +71,35 @@
 
 ---
 
+## Pre-built binaries
+
+Self-contained executables for Windows and macOS are attached to every
+[GitHub release](https://github.com/eal49/Traxus/releases). No Python install required.
+
+### Windows — SmartScreen warning
+
+The `.exe` is not code-signed, so Windows will show a "Windows protected your PC" prompt on first run.
+
+1. Click **More info**
+2. Click **Run anyway**
+
+The app is safe to run — you can inspect the full source and the build workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) yourself.
+
+### macOS — Gatekeeper quarantine
+
+macOS quarantines executables downloaded from the internet. Clear the flag before the first run:
+
+```bash
+xattr -rd com.apple.quarantine ./traxus-*-macos-arm64
+chmod +x ./traxus-*-macos-arm64
+./traxus-*-macos-arm64
+```
+
+> **Note:** The macOS binary targets Apple Silicon (arm64). Intel Macs are not supported by the binary — run from source instead.
+
+---
+
 ## Quick Start
 
 ```bash
