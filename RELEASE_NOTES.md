@@ -1,3 +1,20 @@
+## What's new in v0.4.0
+
+- **Persistent message history** — chat history is now stored in a SQLite
+  database (`traxus.db`, configurable via `TRAXUS_DB` env var) and survives
+  server restarts. The last 50 messages are delivered on join as before; the
+  full history is retained in the database indefinitely.
+- **Channel deletion** — any user can delete a non-default channel with
+  `/delete <channel>`. The three default channels (`#general`, `#random`,
+  `#dev`) are protected. All connected clients receive a `channel_deleted`
+  broadcast and are redirected to `#general` if they were in the deleted
+  channel.
+- **Pinned messages persisted** — pins survive server restarts alongside
+  message history (stored in the same SQLite database with cascade deletion).
+- **Fixed login screen tests** — `textual.testing` import corrected to
+  `textual.pilot` for Textual 8.x; `pilot.type()` replaced with direct widget
+  value assignment; all 5 login screen tests now run instead of being skipped.
+
 ## What's new in v0.3.4
 
 - **Discord-like member panel** — the right panel now shows a server-wide
