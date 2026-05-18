@@ -117,7 +117,8 @@ These messages are sent to **every connected client** regardless of channel memb
 |---|---|---|
 | Nick change | `nick_changed` | So all clients can update their local display |
 | Channel created | `channel_created` | Announces the new channel |
-| Channel list refresh | `channel_list` | Sent after `create` and after any disconnect |
+| Channel deleted | `channel_deleted` | Announces the removed channel |
+| Channel list refresh | `channel_list` | Sent after `create`, `delete_channel`, and after any disconnect |
 
 ### Unicast (single client only)
 
@@ -147,7 +148,7 @@ The server bootstraps three channels on startup:
 | `#random` | Anything goes |
 | `#dev` | Dev discussion |
 
-These channels always exist; `create` on any of these names returns `channel_exists`.
+These channels always exist; `create` on any of these names returns `channel_exists`, and `delete_channel` on any of these names returns `cannot_delete_default_channel`.
 
 ### Auto-join on auth
 
@@ -157,11 +158,17 @@ After a successful `auth`, the server **automatically joins the client to `#gene
 2. `user_list` for `#general`
 3. `channel_list` (full directory)
 
-### Message history cap
+### Message history
 
-Each channel maintains an in-memory ring buffer of the last **50 messages** (`MAX_HISTORY = 50` in `server/channel_registry.py`). Older messages are evicted automatically. This history is sent to any client that joins the channel (via the `history` array in the `joined` message).
+Channel message history is stored persistently in a SQLite database (`traxus.db` by default, configurable via the `TRAXUS_DB` environment variable). History survives server restarts.
 
-History is **not persisted** — it resets when the server restarts.
+When a client joins a channel the server sends the **last 50 messages** in the `history` array of the `joined` message. The full history is retained in the database; only the most recent 50 are delivered on join.
+
+`TRAXUS_DB` defaults to `./traxus.db` relative to the working directory. Set it to an absolute path for production deployments:
+
+```bash
+TRAXUS_DB=/var/lib/traxus/traxus.db python -m server.main
+```
 
 ### Disconnect cleanup sequence
 
@@ -173,6 +180,30 @@ When a WebSocket connection closes (clean or error):
 4. The server broadcasts an updated `channel_list` to all remaining clients (member counts change).
 
 This sequence is idempotent for `None` clients (connections that never completed auth are silently cleaned up).
+
+---
+
+## Channel Deletion Rules
+
+Any authenticated user may delete a channel with the `delete_channel` message.
+
+### Protected channels
+
+The three default channels (`general`, `random`, `dev`) cannot be deleted.
+
+| Condition | `error.code` |
+|---|---|
+| Channel does not exist | `no_such_channel` |
+| Channel is a default (`general`, `random`, or `dev`) | `cannot_delete_default_channel` |
+
+### Cascade on deletion
+
+When a channel is deleted:
+1. All messages and pins for that channel are removed from the database (foreign-key cascade).
+2. `channel_deleted { channel: name }` is broadcast to **all connected clients**.
+3. A fresh `channel_list` is broadcast to **all connected clients**.
+
+Clients that were in the deleted channel should automatically rejoin `#general`.
 
 ---
 

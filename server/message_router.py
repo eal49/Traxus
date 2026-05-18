@@ -51,6 +51,7 @@ class MessageRouter:
             C2S.VOICE_ICE:       self._handle_voice_signal,
             C2S.PIN_MESSAGE:     self._handle_pin_message,
             C2S.CHANGE_PASSWORD: self._handle_change_password,
+            C2S.DELETE_CHANNEL:  self._handle_delete_channel,
         }
 
     # ── Entry point ───────────────────────────────────────────────────────────
@@ -194,13 +195,13 @@ class MessageRouter:
     async def _do_join(self, client, ws, channel: str) -> None:
         client.channels.add(channel)
 
-        history = self._chan.get_history(channel)
+        history = await self._chan.get_history(channel)
         join_payload: dict = {
             "type": S2C.JOINED,
             "channel": channel,
             "history": history,
         }
-        pin = self._chan.get_pin(channel)
+        pin = await self._chan.get_pin(channel)
         if pin:
             join_payload["pin"] = pin
         await self._send(ws, join_payload)
@@ -282,7 +283,7 @@ class MessageRouter:
             "ts": time.time(),
             "msg_id": str(uuid4()),
         }
-        self._chan.add_to_history(channel, msg)
+        await self._chan.add_to_history(channel, msg)
         await self._conn.broadcast_to_channel(channel, msg)
         log.debug("MSG   #%s <%s> %s", channel, client.username, content[:60])
         return client
@@ -335,9 +336,9 @@ class MessageRouter:
             return client
 
         if channel_type == "voice":
-            self._chan.vcreate(name, topic="", created_by=client.username)
+            await self._chan.vcreate(name, topic="", created_by=client.username)
         else:
-            self._chan.create(name, topic="", created_by=client.username)
+            await self._chan.create(name, topic="", created_by=client.username)
         log.info("CREATE #%s (type=%s) by %s", name, channel_type, client.username)
 
         await self._conn.broadcast_to_all({
@@ -450,7 +451,7 @@ class MessageRouter:
             "username": str(payload.get("username", client.username)),
             "content": content,
         }
-        self._chan.set_pin(channel, pin_payload)
+        await self._chan.set_pin(channel, pin_payload)
         await self._conn.broadcast_to_channel(channel, pin_payload)
         log.info("PIN   #%s msg_id=%s by %s", channel, msg_id, client.username)
         return client
@@ -483,6 +484,33 @@ class MessageRouter:
 
         log.info("PASSWD user=%s changed password", client.username)
         await self._send(ws, {"type": S2C.PASSWORD_CHANGED})
+        return client
+
+    async def _handle_delete_channel(self, payload, ws, client):
+        name = str(payload.get("channel", "")).strip().lstrip("#")
+
+        if not self._chan.exists(name):
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.NO_SUCH_CHANNEL,
+                "message": f"Channel #{name} does not exist.",
+            })
+            return client
+
+        if self._chan.is_default(name):
+            await self._send(ws, {
+                "type": S2C.ERROR, "code": ErrorCode.CANNOT_DELETE_DEFAULT,
+                "message": f"#{name} is a default channel and cannot be deleted.",
+            })
+            return client
+
+        await self._chan.delete(name)
+        log.info("DELETE #%s by %s", name, client.username)
+
+        await self._conn.broadcast_to_all({
+            "type": S2C.CHANNEL_DELETED,
+            "channel": name,
+        })
+        await self._broadcast_channel_list()
         return client
 
     async def _handle_voice_signal(self, payload, ws, client):

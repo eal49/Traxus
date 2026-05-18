@@ -700,6 +700,13 @@ class TraxusApp(App):
                 if chat:
                     chat.append_system(f"{who} created #{ch}")
 
+            case S2C.CHANNEL_DELETED:
+                ch = payload.get("channel", "")
+                if chat:
+                    chat.append_system(f"#{ch} was deleted")
+                if self.current_channel == ch:
+                    self.join_channel("general")
+
             case "voice_state":
                 channel = payload.get("channel", "")
                 users = payload.get("users", [])

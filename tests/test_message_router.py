@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from server.connection_manager import ConnectionManager
 from server.channel_registry import ChannelRegistry
+from server.database import DatabaseAdapter
 from server.message_router import MessageRouter
 from shared.message_types import C2S, S2C, AuthError, ErrorCode, PasswordChangeError, VERSION
 
@@ -50,9 +51,12 @@ class MockWs:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def make_router():
+async def make_router():
+    db = DatabaseAdapter(":memory:")
+    await db.open()
     conn = ConnectionManager()
-    chan  = ChannelRegistry()
+    chan = ChannelRegistry(db)
+    await chan.load()
     router = MessageRouter(conn, chan)
     return router, conn, chan
 
@@ -69,9 +73,12 @@ async def do_auth(router, conn, ws, username="alice"):
 
 class TestAuth(unittest.IsolatedAsyncioTestCase):
 
-    def setUp(self):
-        self.router, self.conn, self.chan = make_router()
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_auth_ok_sent(self):
         await do_auth(self.router, self.conn, self.ws)
@@ -168,10 +175,13 @@ class TestAuth(unittest.IsolatedAsyncioTestCase):
 class TestJoin(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_join_existing_channel(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -186,7 +196,7 @@ class TestJoin(unittest.IsolatedAsyncioTestCase):
         self.assertIn("random", self.client.channels)
 
     async def test_join_sends_history(self):
-        self.chan.add_to_history("random", {"username": "x", "content": "hi", "ts": 1.0})
+        await self.chan.add_to_history("random", {"type": "chat", "msg_id": "m1", "channel": "random", "user_id": "u1", "username": "x", "content": "hi", "ts": 1.0})
         await router_dispatch(self.router, self.ws, self.client,
                               {"type": C2S.JOIN, "channel": "random"})
         msg = self.ws.first_of_type(S2C.JOINED)
@@ -228,13 +238,16 @@ class TestJoin(unittest.IsolatedAsyncioTestCase):
 class TestLeave(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         # Join random explicitly
         await router_dispatch(self.router, self.ws, self.client,
                               {"type": C2S.JOIN, "channel": "random"})
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_leave_sends_left_message(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -260,7 +273,7 @@ class TestLeave(unittest.IsolatedAsyncioTestCase):
 class TestMessage(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws_a = MockWs()
         self.ws_b = MockWs()
         self.alice = await do_auth(self.router, self.conn, self.ws_a)
@@ -270,6 +283,9 @@ class TestMessage(unittest.IsolatedAsyncioTestCase):
         self.bob.channels.add("general")
         self.ws_a.clear()
         self.ws_b.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_message_broadcast_to_all_members(self):
         await router_dispatch(self.router, self.ws_a, self.alice,
@@ -311,7 +327,7 @@ class TestMessage(unittest.IsolatedAsyncioTestCase):
         await router_dispatch(self.router, self.ws_a, self.alice,
                               {"type": C2S.MESSAGE, "channel": "general",
                                "content": "stored"})
-        history = self.chan.get_history("general")
+        history = await self.chan.get_history("general")
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["content"], "stored")
 
@@ -319,7 +335,7 @@ class TestMessage(unittest.IsolatedAsyncioTestCase):
         await router_dispatch(self.router, self.ws_a, self.alice,
                               {"type": C2S.MESSAGE, "channel": "general",
                                "content": ""})
-        self.assertEqual(len(self.chan.get_history("general")), 0)
+        self.assertEqual(len(await self.chan.get_history("general")), 0)
         self.assertEqual(len(self.ws_b.sent), 0)
 
     async def test_message_to_nonexistent_channel_returns_error(self):
@@ -334,10 +350,13 @@ class TestMessage(unittest.IsolatedAsyncioTestCase):
 class TestNick(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_nick_change_broadcasts_nick_changed(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -390,10 +409,13 @@ class TestNick(unittest.IsolatedAsyncioTestCase):
 class TestCreate(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_create_channel_exists_after(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -445,10 +467,13 @@ class TestCreate(unittest.IsolatedAsyncioTestCase):
 class TestPingAndList(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_ping_returns_pong(self):
         ts = time.time()
@@ -486,10 +511,13 @@ class TestPingAndList(unittest.IsolatedAsyncioTestCase):
 class TestListMembers(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_list_members_returns_user_list_to_requester_only(self):
         # Second client joins #general so there are two members to list.
@@ -525,13 +553,16 @@ class TestListMembers(unittest.IsolatedAsyncioTestCase):
 class TestDisconnect(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws_a = MockWs()
         self.ws_b = MockWs()
         self.alice = await do_auth(self.router, self.conn, self.ws_a)
         self.bob   = await do_auth(self.router, self.conn, self.ws_b, username="bob")
         self.ws_a.clear()
         self.ws_b.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_disconnect_removes_client(self):
         user_id = self.alice.user_id
@@ -565,12 +596,14 @@ async def router_dispatch(router, ws, client, payload: dict):
 class TestVoiceJoin(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
-        # Create a voice channel
-        self.chan.vcreate("lounge", "Voice lounge", "system")
+        await self.chan.vcreate("lounge", "Voice lounge", "system")
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_voice_join_success_sends_voice_state(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -613,12 +646,15 @@ class TestVoiceJoin(unittest.IsolatedAsyncioTestCase):
 class TestVoiceLeave(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.client = await do_auth(self.router, self.conn, self.ws)
-        self.chan.vcreate("lounge", "Voice lounge", "system")
+        await self.chan.vcreate("lounge", "Voice lounge", "system")
         self.client.voice_channels.add("lounge")
         self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_voice_leave_removes_from_voice_channels(self):
         await router_dispatch(self.router, self.ws, self.client,
@@ -689,16 +725,19 @@ class TestVoiceLeave(unittest.IsolatedAsyncioTestCase):
 class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
         self.ws2 = MockWs()
         self.alice = await do_auth(self.router, self.conn, self.ws)
         self.bob = await do_auth(self.router, self.conn, self.ws2, username="bob")
-        self.chan.vcreate("lounge", "Voice", "system")
+        await self.chan.vcreate("lounge", "Voice", "system")
         self.alice.voice_channels.add("lounge")
         self.bob.voice_channels.add("lounge")
         self.ws.clear()
         self.ws2.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_disconnect_sends_voice_state_to_remaining(self):
         await self.router.on_disconnect(self.alice)
@@ -716,9 +755,12 @@ class TestDisconnectClearsVoice(unittest.IsolatedAsyncioTestCase):
 
 class TestMsgId(unittest.IsolatedAsyncioTestCase):
 
-    def setUp(self):
-        self.router, self.conn, self.chan = make_router()
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_chat_message_has_msg_id(self):
         client = await do_auth(self.router, self.conn, self.ws)
@@ -758,7 +800,7 @@ class TestMsgId(unittest.IsolatedAsyncioTestCase):
             }),
             self.ws, client,
         )
-        history = self.chan.get_history("general")
+        history = await self.chan.get_history("general")
         self.assertGreater(len(history), 0)
         self.assertIn("msg_id", history[-1])
 
@@ -767,9 +809,12 @@ class TestMsgId(unittest.IsolatedAsyncioTestCase):
 
 class TestPinMessage(unittest.IsolatedAsyncioTestCase):
 
-    def setUp(self):
-        self.router, self.conn, self.chan = make_router()
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = await make_router()
         self.ws = MockWs()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def _send_chat_and_get_msg_id(self, client, channel="general", content="pinnable"):
         await self.router.dispatch(
@@ -813,7 +858,7 @@ class TestPinMessage(unittest.IsolatedAsyncioTestCase):
             }),
             self.ws, client,
         )
-        pin = self.chan.get_pin("general")
+        pin = await self.chan.get_pin("general")
         self.assertIsNotNone(pin)
         self.assertEqual(pin["msg_id"], msg_id)
 
@@ -865,10 +910,13 @@ except ImportError:
     _BCRYPT_AVAILABLE = False
 
 
-def _make_router_with_store(store):
+async def _make_router_with_store(store):
     """Return a MessageRouter wired to a fake credential store."""
+    db = DatabaseAdapter(":memory:")
+    await db.open()
     conn = ConnectionManager()
-    chan  = ChannelRegistry()
+    chan = ChannelRegistry(db)
+    await chan.load()
     return MessageRouter(conn, chan, auth_store=store), conn, chan
 
 
@@ -881,10 +929,13 @@ def _make_store(username, password, must_change: bool = False):
 @unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
 class TestAuthWithCredentials(unittest.IsolatedAsyncioTestCase):
 
-    def setUp(self):
+    async def asyncSetUp(self):
         self.store = _make_store("alice", "correct")
-        self.router, self.conn, self.chan = _make_router_with_store(self.store)
+        self.router, self.conn, self.chan = await _make_router_with_store(self.store)
         self.ws = MockWs()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_correct_password_accepted(self):
         client = await self.router.dispatch(
@@ -941,9 +992,12 @@ class TestAuthWithCredentials(unittest.IsolatedAsyncioTestCase):
 class TestAuthNoAuthMode(unittest.IsolatedAsyncioTestCase):
     """No-auth mode: auth_store=None — password field ignored entirely."""
 
-    def setUp(self):
-        self.router, self.conn, self.chan = make_router()  # auth_store=None
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = await make_router()  # auth_store=None
         self.ws = MockWs()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_no_auth_mode_accepts_without_password(self):
         client = await self.router.dispatch(
@@ -976,7 +1030,7 @@ class TestAuthMustChangePassword(unittest.IsolatedAsyncioTestCase):
 
     async def test_must_change_password_true_in_auth_ok(self):
         store = _make_store("alice", "correct", must_change=True)
-        router, _, _ = _make_router_with_store(store)
+        router, _, chan = await _make_router_with_store(store)
         await router.dispatch(
             json.dumps({
                 "type": C2S.AUTH, "username": "alice",
@@ -987,10 +1041,11 @@ class TestAuthMustChangePassword(unittest.IsolatedAsyncioTestCase):
         msg = self.ws.first_of_type(S2C.AUTH_OK)
         self.assertIsNotNone(msg)
         self.assertTrue(msg.get("must_change_password"))
+        await chan._db.close()
 
     async def test_must_change_password_absent_when_false(self):
         store = _make_store("alice", "correct", must_change=False)
-        router, _, _ = _make_router_with_store(store)
+        router, _, chan = await _make_router_with_store(store)
         await router.dispatch(
             json.dumps({
                 "type": C2S.AUTH, "username": "alice",
@@ -1001,30 +1056,37 @@ class TestAuthMustChangePassword(unittest.IsolatedAsyncioTestCase):
         msg = self.ws.first_of_type(S2C.AUTH_OK)
         self.assertIsNotNone(msg)
         self.assertFalse(msg.get("must_change_password"))
+        await chan._db.close()
 
 
 @unittest.skipUnless(_BCRYPT_AVAILABLE, "bcrypt not installed")
 class TestChangePassword(unittest.IsolatedAsyncioTestCase):
     """change_password handler."""
 
-    def setUp(self):
+    async def asyncSetUp(self):
         import tempfile, json as _json, bcrypt as _bcrypt
         self.tmpdir = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.tmpdir.name, "users.json")
         hashed = _bcrypt.hashpw(b"oldpassword1", _bcrypt.gensalt()).decode()
         with open(self.path, "w") as f:
             _json.dump({"alice": {"hash": hashed, "must_change": False}}, f)
-        store = MessageRouter.__new__(MessageRouter)  # don't call __init__
         from server import auth_store as _as
         loaded = _as.load(self.path)
+        db = DatabaseAdapter(":memory:")
+        await db.open()
         conn = ConnectionManager()
-        chan = ChannelRegistry()
+        chan = ChannelRegistry(db)
+        await chan.load()
         self.router = MessageRouter(conn, chan, auth_store=loaded, auth_store_path=self.path)
+        self.chan = chan
         self.conn = conn
         self.ws = MockWs()
 
     def tearDown(self):
         self.tmpdir.cleanup()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def _auth(self, username="alice", password="oldpassword1") -> object:
         """Authenticate and return the client object."""
@@ -1095,26 +1157,28 @@ class TestChangePassword(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msg["reason"], PasswordChangeError.SAME_PASSWORD)
 
     async def test_no_auth_store_sends_auth_disabled(self):
-        conn = ConnectionManager()
-        chan = ChannelRegistry()
-        router_no_auth = MessageRouter(conn, chan, auth_store=None, auth_store_path=None)
-        # Register a client without going through auth
-        ws = MockWs()
-        from server.connection_manager import ConnectedClient
-        import uuid
-        ws2 = MockWs()
-        client = conn.register(ws2, "bob")
-        await router_no_auth.dispatch(
-            json.dumps({
-                "type": C2S.CHANGE_PASSWORD,
-                "old_password": "anything",
-                "new_password": "newpassword2",
-            }),
-            ws2, client,
-        )
-        msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
-        self.assertIsNotNone(msg)
-        self.assertEqual(msg["reason"], PasswordChangeError.AUTH_DISABLED)
+        db = DatabaseAdapter(":memory:")
+        await db.open()
+        try:
+            conn = ConnectionManager()
+            chan = ChannelRegistry(db)
+            await chan.load()
+            router_no_auth = MessageRouter(conn, chan, auth_store=None, auth_store_path=None)
+            ws2 = MockWs()
+            client = conn.register(ws2, "bob")
+            await router_no_auth.dispatch(
+                json.dumps({
+                    "type": C2S.CHANGE_PASSWORD,
+                    "old_password": "anything",
+                    "new_password": "newpassword2",
+                }),
+                ws2, client,
+            )
+            msg = ws2.first_of_type(S2C.PASSWORD_CHANGE_ERROR)
+            self.assertIsNotNone(msg)
+            self.assertEqual(msg["reason"], PasswordChangeError.AUTH_DISABLED)
+        finally:
+            await db.close()
 
 
 # ── Task 4.3: auth_ok online_users / known_users ──────────────────────────────
@@ -1122,22 +1186,24 @@ class TestChangePassword(unittest.IsolatedAsyncioTestCase):
 class TestAuthOkPresenceFields(unittest.IsolatedAsyncioTestCase):
 
     async def test_auth_ok_contains_online_users(self):
-        router, conn, _ = make_router()
+        router, conn, chan = await make_router()
         ws = MockWs()
         await do_auth(router, conn, ws)
         msg = ws.first_of_type(S2C.AUTH_OK)
         self.assertIn("online_users", msg)
         self.assertIsInstance(msg["online_users"], list)
+        await chan._db.close()
 
     async def test_auth_ok_online_users_includes_self(self):
-        router, conn, _ = make_router()
+        router, conn, chan = await make_router()
         ws = MockWs()
         await do_auth(router, conn, ws, username="alice")
         msg = ws.first_of_type(S2C.AUTH_OK)
         self.assertIn("alice", msg["online_users"])
+        await chan._db.close()
 
     async def test_auth_ok_online_users_includes_existing_peer(self):
-        router, conn, _ = make_router()
+        router, conn, chan = await make_router()
         ws_alice = MockWs()
         await do_auth(router, conn, ws_alice, username="alice")
         ws_bob = MockWs()
@@ -1145,21 +1211,24 @@ class TestAuthOkPresenceFields(unittest.IsolatedAsyncioTestCase):
         msg = ws_bob.first_of_type(S2C.AUTH_OK)
         self.assertIn("alice", msg["online_users"])
         self.assertIn("bob", msg["online_users"])
+        await chan._db.close()
 
     async def test_auth_ok_contains_known_users(self):
-        router, conn, _ = make_router()
+        router, conn, chan = await make_router()
         ws = MockWs()
         await do_auth(router, conn, ws)
         msg = ws.first_of_type(S2C.AUTH_OK)
         self.assertIn("known_users", msg)
         self.assertIsInstance(msg["known_users"], list)
+        await chan._db.close()
 
     async def test_auth_ok_known_users_equals_online_when_no_auth_store(self):
-        router, conn, _ = make_router()
+        router, conn, chan = await make_router()
         ws = MockWs()
         await do_auth(router, conn, ws, username="alice")
         msg = ws.first_of_type(S2C.AUTH_OK)
         self.assertEqual(sorted(msg["online_users"]), sorted(msg["known_users"]))
+        await chan._db.close()
 
 
 # ── Task 4.1: user_online / user_offline broadcasts ───────────────────────────
@@ -1167,10 +1236,13 @@ class TestAuthOkPresenceFields(unittest.IsolatedAsyncioTestCase):
 class TestUserOnlineOfflineBroadcasts(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
+        self.router, self.conn, self.chan = await make_router()
         self.ws_alice = MockWs()
         self.alice = await do_auth(self.router, self.conn, self.ws_alice, username="alice")
         self.ws_alice.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_user_online_sent_to_existing_peers_on_new_auth(self):
         ws_bob = MockWs()
@@ -1207,11 +1279,14 @@ class TestUserOnlineOfflineBroadcasts(unittest.IsolatedAsyncioTestCase):
 class TestChannelListVoiceMembers(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
-        self.router, self.conn, self.chan = make_router()
-        self.chan.vcreate("lounge", "Voice lounge", "system")
+        self.router, self.conn, self.chan = await make_router()
+        await self.chan.vcreate("lounge", "Voice lounge", "system")
         self.ws_alice = MockWs()
         self.alice = await do_auth(self.router, self.conn, self.ws_alice, username="alice")
         self.ws_alice.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
 
     async def test_channel_list_voice_channel_has_voice_members_key(self):
         cl = self.ws_alice.first_of_type(S2C.CHANNEL_LIST)
@@ -1278,6 +1353,85 @@ class TestChannelListVoiceMembers(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(bob_cl), 0)
         lounge = next(c for c in bob_cl[-1]["channels"] if c["name"] == "lounge")
         self.assertNotIn("alice", lounge.get("voice_members", []))
+
+
+# ── delete_channel handler ────────────────────────────────────────────────────
+
+class TestDeleteChannel(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self.router, self.conn, self.chan = await make_router()
+        self.ws = MockWs()
+        self.client = await do_auth(self.router, self.conn, self.ws)
+        await self.chan.create("deletable", "A deletable channel", "system")
+        self.ws.clear()
+
+    async def asyncTearDown(self):
+        await self.chan._db.close()
+
+    async def test_delete_removes_channel(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "deletable"})
+        self.assertFalse(self.chan.exists("deletable"))
+
+    async def test_delete_broadcasts_channel_deleted(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "deletable"})
+        msg = self.ws.first_of_type(S2C.CHANNEL_DELETED)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["channel"], "deletable")
+
+    async def test_delete_broadcasts_updated_channel_list(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "deletable"})
+        cl = self.ws.first_of_type(S2C.CHANNEL_LIST)
+        self.assertIsNotNone(cl)
+        names = [c["name"] for c in cl["channels"]]
+        self.assertNotIn("deletable", names)
+
+    async def test_delete_strips_hash_prefix(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "#deletable"})
+        self.assertFalse(self.chan.exists("deletable"))
+
+    async def test_delete_default_general_returns_error(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "general"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.CANNOT_DELETE_DEFAULT)
+
+    async def test_delete_default_random_returns_error(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "random"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.CANNOT_DELETE_DEFAULT)
+
+    async def test_delete_default_dev_returns_error(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "dev"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.CANNOT_DELETE_DEFAULT)
+
+    async def test_delete_nonexistent_returns_error(self):
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "ghost"})
+        err = self.ws.first_of_type(S2C.ERROR)
+        self.assertIsNotNone(err)
+        self.assertEqual(err["code"], ErrorCode.NO_SUCH_CHANNEL)
+
+    async def test_delete_notifies_all_clients(self):
+        ws2 = MockWs()
+        bob = await do_auth(self.router, self.conn, ws2, username="bob")
+        ws2.clear()
+
+        await router_dispatch(self.router, self.ws, self.client,
+                              {"type": C2S.DELETE_CHANNEL, "channel": "deletable"})
+        msg = ws2.first_of_type(S2C.CHANNEL_DELETED)
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg["channel"], "deletable")
 
 
 if __name__ == "__main__":

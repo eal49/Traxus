@@ -183,6 +183,23 @@ Create a new channel.
 
 ---
 
+### delete_channel
+
+Delete a non-default text channel. Any user may delete a channel; the default channels (`general`, `random`, `dev`) are protected.
+
+```json
+{ "type": "delete_channel", "channel": "old-project" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"delete_channel"` |
+| `channel` | string | Yes | Channel name to delete. Leading `#` stripped by the server. |
+
+On success the server broadcasts `channel_deleted` and a fresh `channel_list` to all connected clients. Clients that were in the deleted channel should rejoin `#general`.
+
+---
+
 ### list_channels
 
 Request a fresh channel directory from the server.
@@ -449,7 +466,7 @@ Directory of all channels on the server.
 | `channels[].type` | string | `"text"` or `"voice"`. |
 | `channels[].voice_members` | array of strings | **Voice channels only.** Usernames of all clients currently in the voice channel. Absent for text channels. |
 
-Sent to: the requesting client on `auth` and `list_channels`; **broadcast to all clients** on `create`, on disconnect, and whenever voice membership changes (`voice_join`, `voice_leave`, or disconnect while in a voice channel).
+Sent to: the requesting client on `auth` and `list_channels`; **broadcast to all clients** on `create`, `delete_channel`, on disconnect, and whenever voice membership changes (`voice_join`, `voice_leave`, or disconnect while in a voice channel).
 
 ---
 
@@ -595,6 +612,23 @@ Sent to: **all connected clients**. Always followed by a `channel_list` broadcas
 
 ---
 
+### channel_deleted
+
+Broadcast when a channel is deleted.
+
+```json
+{ "type": "channel_deleted", "channel": "old-project" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"channel_deleted"` |
+| `channel` | string | Name of the deleted channel. |
+
+Sent to: **all connected clients**. Always followed by a `channel_list` broadcast. Clients that were in the deleted channel should automatically rejoin `#general`.
+
+---
+
 ### user_list
 
 Members of a channel. Sent to the joining client immediately after `joined`.
@@ -650,6 +684,7 @@ Generic error response.
 | `nick_taken` | `nick` where the new name is already in use |
 | `invalid_channel_name` | `create` with an invalid name; also used for invalid `nick` values |
 | `not_a_voice_channel` | `voice_join` targeting a channel that exists but has `type: "text"` |
+| `cannot_delete_default_channel` | `delete_channel` targeting one of the three protected defaults (`general`, `random`, `dev`) |
 
 ---
 
@@ -797,10 +832,3 @@ Broadcast to all remaining connected clients when a client disconnects (clean cl
 
 Sent to: **all remaining connected clients**. Triggered on both clean WebSocket close and abnormal disconnection. Clients use this to move the user from the Online section to the Offline section (if the user is a registered user known from `auth_ok`'s `known_users` list).
 
----
-
-**Updated error codes** (additions to the existing error table):
-
-| Code | Trigger |
-|---|---|
-| `not_a_voice_channel` | `voice_join` targeting a text channel |

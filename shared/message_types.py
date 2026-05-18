@@ -26,6 +26,7 @@ class C2S:
     PIN_MESSAGE      = "pin_message"
     UNPIN_MESSAGE    = "unpin_message"
     CHANGE_PASSWORD  = "change_password"
+    DELETE_CHANNEL   = "delete_channel"
 
 
 # ── Server → Client ──────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ class S2C:
     PASSWORD_CHANGE_ERROR = "password_change_error"
     USER_ONLINE          = "user_online"
     USER_OFFLINE         = "user_offline"
+    CHANNEL_DELETED      = "channel_deleted"
 
 
 # ── Auth error reasons ────────────────────────────────────────────────────────
@@ -73,11 +75,12 @@ class PasswordChangeError:
 
 
 class ErrorCode:
-    NOT_AUTHENTICATED    = "not_authenticated"
-    INVALID_JSON         = "invalid_json"
-    UNKNOWN_TYPE         = "unknown_message_type"
-    NO_SUCH_CHANNEL      = "no_such_channel"
-    CHANNEL_EXISTS       = "channel_exists"
-    NICK_TAKEN           = "nick_taken"
-    INVALID_CHANNEL_NAME = "invalid_channel_name"
-    NOT_A_VOICE_CHANNEL  = "not_a_voice_channel"
+    NOT_AUTHENTICATED       = "not_authenticated"
+    INVALID_JSON            = "invalid_json"
+    UNKNOWN_TYPE            = "unknown_message_type"
+    NO_SUCH_CHANNEL         = "no_such_channel"
+    CHANNEL_EXISTS          = "channel_exists"
+    NICK_TAKEN              = "nick_taken"
+    INVALID_CHANNEL_NAME    = "invalid_channel_name"
+    NOT_A_VOICE_CHANNEL     = "not_a_voice_channel"
+    CANNOT_DELETE_DEFAULT   = "cannot_delete_default_channel"

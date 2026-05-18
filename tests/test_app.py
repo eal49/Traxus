@@ -262,6 +262,52 @@ class TestServerMessageRouting(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(_line_count(mv), before)
 
 
+# ── channel_deleted handler ───────────────────────────────────────────────────
+
+class TestChannelDeletedHandler(unittest.IsolatedAsyncioTestCase):
+    """Client-side handling of channel_deleted server broadcasts."""
+
+    async def _on_chat(self, app, pilot):
+        await app.switch_screen(ChatScreen())
+        await pilot.pause()
+
+    async def test_channel_deleted_appends_system_message(self):
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            mv = app.screen.query_one("#messages", MessageView)
+            before = _line_count(mv)
+
+            app.post_message(_server_msg({"type": "channel_deleted", "channel": "deletable"}))
+            await pilot.pause()
+
+            self.assertGreater(_line_count(mv), before)
+
+    async def test_channel_deleted_calls_join_general_when_active(self):
+        from unittest.mock import patch
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_channel = "deletable"
+
+            with patch.object(app, "join_channel") as mock_join:
+                app.post_message(_server_msg({"type": "channel_deleted", "channel": "deletable"}))
+                await pilot.pause()
+                mock_join.assert_called_once_with("general")
+
+    async def test_channel_deleted_does_not_switch_when_in_other_channel(self):
+        from unittest.mock import patch
+        app = TraxusApp()
+        async with app.run_test() as pilot:
+            await self._on_chat(app, pilot)
+            app.current_channel = "random"
+
+            with patch.object(app, "join_channel") as mock_join:
+                app.post_message(_server_msg({"type": "channel_deleted", "channel": "deletable"}))
+                await pilot.pause()
+                mock_join.assert_not_called()
+
+
 # ── command dispatch writes to MessageView ────────────────────────────────────
 
 class TestCommandDispatch(unittest.IsolatedAsyncioTestCase):

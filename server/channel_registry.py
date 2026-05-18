@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import re
 import time
-from collections import deque
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from server.database import DatabaseAdapter
 
 CHANNEL_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
-MAX_HISTORY = 50
 
 _DEFAULT_CHANNELS = [
     ("general", "General chat"),
     ("random",  "Anything goes"),
     ("dev",     "Dev discussion"),
 ]
+
+_DEFAULT_NAMES = frozenset(name for name, _ in _DEFAULT_CHANNELS)
 
 
 @dataclass
@@ -22,25 +26,35 @@ class Channel:
     created_by: str
     type: str = "text"
     created_at: float = field(default_factory=time.time)
-    history: deque = field(default_factory=lambda: deque(maxlen=MAX_HISTORY))
 
 
 class ChannelRegistry:
 
-    def __init__(self) -> None:
+    def __init__(self, db: "DatabaseAdapter") -> None:
+        self._db = db
         self._channels: dict[str, Channel] = {}
-        self._pins: dict[str, dict] = {}
-        self._bootstrap_defaults()
 
-    def _bootstrap_defaults(self) -> None:
+    async def load(self) -> None:
+        rows = await self._db.fetch_channels()
+        if not rows:
+            await self._bootstrap_defaults()
+        else:
+            for row in rows:
+                self._channels[row["name"]] = Channel(
+                    name=row["name"],
+                    topic=row["topic"],
+                    type=row["type"],
+                    created_by=row["created_by"],
+                    created_at=row["created_at"],
+                )
+
+    async def _bootstrap_defaults(self) -> None:
         for name, topic in _DEFAULT_CHANNELS:
-            self._channels[name] = Channel(
-                name=name,
-                topic=topic,
-                created_by="system",
-            )
+            ch = Channel(name=name, topic=topic, created_by="system")
+            self._channels[name] = ch
+            await self._db.insert_channel(ch)
 
-    # ── Queries ───────────────────────────────────────────────────────────────
+    # ── Queries (sync — metadata dict only) ──────────────────────────────────
 
     def get(self, name: str) -> Channel | None:
         return self._channels.get(name)
@@ -51,34 +65,45 @@ class ChannelRegistry:
     def all_channels(self) -> list[Channel]:
         return list(self._channels.values())
 
-    def get_history(self, name: str) -> list[dict]:
-        ch = self._channels.get(name)
-        return list(ch.history) if ch else []
+    # ── Mutations (async — touch DB) ──────────────────────────────────────────
 
-    # ── Mutations ─────────────────────────────────────────────────────────────
-
-    def create(self, name: str, topic: str, created_by: str) -> Channel:
+    async def create(self, name: str, topic: str, created_by: str) -> Channel:
         ch = Channel(name=name, topic=topic, created_by=created_by)
         self._channels[name] = ch
+        await self._db.insert_channel(ch)
         return ch
 
-    def vcreate(self, name: str, topic: str, created_by: str) -> Channel:
+    async def vcreate(self, name: str, topic: str, created_by: str) -> Channel:
         ch = Channel(name=name, topic=topic, created_by=created_by, type="voice")
         self._channels[name] = ch
+        await self._db.insert_channel(ch)
         return ch
 
-    def add_to_history(self, name: str, message: dict) -> None:
-        ch = self._channels.get(name)
-        if ch:
-            ch.history.append(message)
+    async def delete(self, name: str) -> None:
+        self._channels.pop(name, None)
+        await self._db.delete_channel(name)
 
-    def set_pin(self, channel: str, payload: dict) -> None:
-        self._pins[channel] = payload
+    async def add_to_history(self, name: str, message: dict) -> None:
+        if name in self._channels:
+            await self._db.insert_message(message)
 
-    def get_pin(self, channel: str) -> dict | None:
-        return self._pins.get(channel)
+    async def get_history(
+        self,
+        name: str,
+        limit: int = 50,
+        before_ts: float | None = None,
+    ) -> list[dict]:
+        if name not in self._channels:
+            return []
+        return await self._db.fetch_messages(name, limit, before_ts)
 
-    # ── Serialisation ─────────────────────────────────────────────────────────
+    async def set_pin(self, channel: str, payload: dict) -> None:
+        await self._db.upsert_pin(channel, payload)
+
+    async def get_pin(self, channel: str) -> dict | None:
+        return await self._db.fetch_pin(channel)
+
+    # ── Serialisation (sync) ──────────────────────────────────────────────────
 
     def channel_summary(self, ch: Channel, member_count: int, voice_members: list[str] | None = None) -> dict:
         d: dict = {
@@ -94,3 +119,7 @@ class ChannelRegistry:
     @staticmethod
     def is_valid_name(name: str) -> bool:
         return bool(CHANNEL_NAME_RE.match(name))
+
+    @staticmethod
+    def is_default(name: str) -> bool:
+        return name in _DEFAULT_NAMES
