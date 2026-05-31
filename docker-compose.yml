@@ -1,0 +1,15 @@
+services:
+  traxus:
+    build: .
+    container_name: traxus
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ${TRAXUS_DATA_DIR:-./data}:/data
+    environment:
+      - TRAXUS_HOST=0.0.0.0
+      - TRAXUS_PORT=8765
+      - TRAXUS_DB=/data/traxus.db
+      # Uncomment to enable password authentication:
+      # - TRAXUS_USERS=/data/users.json
